@@ -64,9 +64,11 @@ jobs:
           fi
           nix flake update
 
-      - name: Format with Edition 2024 rustfmt & run Clippy + Tests
+      - name: Auto-apply Edition 2024 idioms, rustfmt, Clippy & Tests
         run: |
           set -o pipefail
+          cargo fix --workspace --all-targets --allow-dirty --allow-staged || true
+          cargo clippy --fix --workspace --all-targets --allow-dirty --allow-staged -- -D warnings || true
           cargo fmt --all
           if ! cargo clippy --workspace --all-targets --locked -- -D warnings 2>&1 | tee /tmp/clippy.log; then
             MSG=$(sed 's/\x1b\[[0-9;]*m//g' /tmp/clippy.log | tail -n 35 | cut -c1-240 | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')
