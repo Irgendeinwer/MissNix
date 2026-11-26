@@ -1,65 +1,84 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 196" width="920" height="196" role="img" aria-label="MissNix — Local Music Release Radar">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 204" width="920" height="204" role="img" aria-label="MissNix — Local Music Release Radar">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#171522"/>
-      <stop offset="55%" stop-color="#1c192b"/>
-      <stop offset="100%" stop-color="#14131c"/>
+      <stop offset="0%" stop-color="#1b120e"/>
+      <stop offset="52%" stop-color="#221712"/>
+      <stop offset="100%" stop-color="#140d0a"/>
     </linearGradient>
-    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#d0bcff"/>
-      <stop offset="100%" stop-color="#7dd3fc"/>
+    <linearGradient id="copperAccent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffb596"/>
+      <stop offset="55%" stop-color="#f28552"/>
+      <stop offset="100%" stop-color="#ea6c34"/>
     </linearGradient>
-    <radialGradient id="glow" cx="14%" cy="50%" r="48%">
-      <stop offset="0%" stop-color="#d0bcff" stop-opacity="0.18"/>
-      <stop offset="100%" stop-color="#d0bcff" stop-opacity="0"/>
+    <linearGradient id="emblemFill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#3c1e11"/>
+      <stop offset="100%" stop-color="#26150e"/>
+    </linearGradient>
+    <radialGradient id="warmGlow" cx="15%" cy="50%" r="52%">
+      <stop offset="0%" stop-color="#ea6c34" stop-opacity="0.24"/>
+      <stop offset="60%" stop-color="#ffb596" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="#ea6c34" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="rightGlow" cx="88%" cy="48%" r="42%">
+      <stop offset="0%" stop-color="#ea6c34" stop-opacity="0.14"/>
+      <stop offset="100%" stop-color="#ea6c34" stop-opacity="0"/>
     </radialGradient>
   </defs>
 
-  <rect width="920" height="196" rx="22" fill="url(#bg)"/>
-  <rect width="920" height="196" rx="22" fill="url(#glow)"/>
-  <rect x="0.75" y="0.75" width="918.5" height="194.5" rx="21.25" fill="none" stroke="#36324a" stroke-width="1.5"/>
+  <rect width="920" height="204" rx="22" fill="url(#bg)"/>
+  <rect width="920" height="204" rx="22" fill="url(#warmGlow)"/>
+  <rect width="920" height="204" rx="22" fill="url(#rightGlow)"/>
+  <rect x="0.75" y="0.75" width="918.5" height="202.5" rx="21.25" fill="none" stroke="#4c352a" stroke-width="1.5"/>
 
-  <!-- Subtle radar arcs on right -->
-  <g stroke="#d0bcff" fill="none" opacity="0.12">
-    <circle cx="848" cy="98" r="56" stroke-width="1.5"/>
-    <circle cx="848" cy="98" r="96" stroke-width="1.5" stroke-dasharray="6 8"/>
-    <circle cx="848" cy="98" r="136" stroke-width="1.5"/>
+  <!-- Warm Copper Radar Rings on Right -->
+  <g stroke="#ffb596" fill="none">
+    <circle cx="844" cy="102" r="52" stroke-width="1.4" opacity="0.16"/>
+    <circle cx="844" cy="102" r="92" stroke-width="1.4" stroke-dasharray="6 8" opacity="0.14"/>
+    <circle cx="844" cy="102" r="134" stroke-width="1.4" opacity="0.10"/>
+    <circle cx="844" cy="102" r="176" stroke-width="1.2" opacity="0.06"/>
+    <circle cx="806" cy="66" r="4" fill="#ffb596" stroke="none" opacity="0.55"/>
+    <circle cx="762" cy="128" r="3" fill="#ea6c34" stroke="none" opacity="0.65"/>
   </g>
 
-  <!-- Brand Emblem -->
-  <g transform="translate(42, 42)">
-    <rect width="112" height="112" rx="28" fill="#2b2442" stroke="#d0bcff" stroke-opacity="0.45" stroke-width="1.5"/>
-    <circle cx="56" cy="56" r="40" fill="#161421" stroke="url(#accent)" stroke-width="2.5"/>
-    <circle cx="56" cy="56" r="29" fill="none" stroke="#d0bcff" stroke-opacity="0.32" stroke-width="1.5"/>
-    <circle cx="56" cy="56" r="19" fill="none" stroke="#7dd3fc" stroke-opacity="0.38" stroke-width="1.5"/>
-    <path d="M56 56 L84 28 A40 40 0 0 1 95 52 Z" fill="url(#accent)" opacity="0.28"/>
-    <line x1="56" y1="56" x2="84" y2="28" stroke="url(#accent)" stroke-width="2.5" stroke-linecap="round"/>
-    <circle cx="56" cy="56" r="9" fill="#2b2442" stroke="#d0bcff" stroke-width="2"/>
-    <circle cx="56" cy="56" r="3" fill="#eaddff"/>
-    <circle cx="77" cy="35" r="4.5" fill="#7dd3fc"/>
+  <!-- Copper Radar Emblem -->
+  <g transform="translate(42, 44)">
+    <rect width="116" height="116" rx="28" fill="url(#emblemFill)" stroke="#ffb596" stroke-opacity="0.45" stroke-width="1.5"/>
+    <circle cx="58" cy="58" r="42" fill="#160e0b" stroke="url(#copperAccent)" stroke-width="2.5"/>
+    <circle cx="58" cy="58" r="30" fill="none" stroke="#ffb596" stroke-opacity="0.30" stroke-width="1.4"/>
+    <circle cx="58" cy="58" r="19" fill="none" stroke="#ea6c34" stroke-opacity="0.42" stroke-width="1.4"/>
+    <path d="M58 58 L87 29 A42 42 0 0 1 99 54 Z" fill="url(#copperAccent)" opacity="0.32"/>
+    <line x1="58" y1="58" x2="87" y2="29" stroke="url(#copperAccent)" stroke-width="2.6" stroke-linecap="round"/>
+    <circle cx="58" cy="58" r="9.5" fill="#3a1c10" stroke="#ffb596" stroke-width="2"/>
+    <circle cx="58" cy="58" r="3.2" fill="#ffdbcd"/>
+    <circle cx="80" cy="36" r="4.8" fill="#ffb596"/>
+    <circle cx="40" cy="73" r="3.2" fill="#ea6c34" opacity="0.85"/>
   </g>
 
-  <!-- Title & Tagline -->
+  <!-- Brand Title, Tagline & Feature Pills -->
   <g font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
-    <text x="182" y="82" font-size="40" font-weight="800" fill="#f3effa" letter-spacing="-0.8">MissNix</text>
-    <text x="184" y="112" font-size="14.5" font-weight="500" fill="#b9b2cc">A desktop release radar for your local music library — scan folders, track artists, miss nothing</text>
+    <text x="186" y="83" font-size="42" font-weight="800" fill="#f7e6df" letter-spacing="-0.9">MissNix</text>
+    <rect x="352" y="59" width="118" height="24" rx="12" fill="#5c2208" stroke="#8a3c19"/>
+    <text x="411" y="75" font-size="11" font-weight="700" fill="#ffdbcd" text-anchor="middle">RELEASE RADAR</text>
 
-    <!-- Tech pills -->
-    <g transform="translate(184, 132)" font-size="12" font-weight="600">
-      <rect x="0" y="0" width="62" height="26" rx="13" fill="#2b2442" stroke="#4a3f6e"/>
-      <text x="31" y="17" fill="#eaddff" text-anchor="middle">Rust</text>
+    <text x="188" y="114" font-size="15" font-weight="500" fill="#dcc1b5">Scan your local music folders, follow favorite artists, and never miss a new release.</text>
 
-      <rect x="70" y="0" width="68" height="26" rx="13" fill="#222a3a" stroke="#364a68"/>
-      <text x="104" y="17" fill="#bae6fd" text-anchor="middle">Slint</text>
+    <!-- User-Focused Highlight Pills (Sunset Copper Tonal Surfaces) -->
+    <g transform="translate(188, 134)" font-size="12" font-weight="600">
+      <rect x="0" y="0" width="142" height="28" rx="14" fill="#3b1d10" stroke="#6f351c"/>
+      <circle cx="16" cy="14" r="3.5" fill="#ffb596"/>
+      <text x="27" y="18" fill="#ffdbcd">Local Library Sync</text>
 
-      <rect x="146" y="0" width="76" height="26" rx="13" fill="#1e322b" stroke="#2f5748"/>
-      <text x="184" y="17" fill="#a7f3d0" text-anchor="middle">SQLite</text>
+      <rect x="150" y="0" width="166" height="28" rx="14" fill="#2b1d17" stroke="#4a342a"/>
+      <circle cx="166" cy="14" r="3.5" fill="#f59e0b"/>
+      <text x="177" y="18" fill="#f2dfd7">New &amp; Upcoming Drops</text>
 
-      <rect x="230" y="0" width="166" height="26" rx="13" fill="#272434" stroke="#3d3852"/>
-      <text x="313" y="17" fill="#d8d2e8" text-anchor="middle">Deezer + MusicBrainz</text>
+      <rect x="324" y="0" width="148" height="28" rx="14" fill="#2b1d17" stroke="#4a342a"/>
+      <circle cx="340" cy="14" r="3.5" fill="#ea6c34"/>
+      <text x="351" y="18" fill="#f2dfd7">30s Track Previews</text>
 
-      <rect x="404" y="0" width="92" height="26" rx="13" fill="#272434" stroke="#3d3852"/>
-      <text x="450" y="17" fill="#d8d2e8" text-anchor="middle">Nix Flake</text>
+      <rect x="480" y="0" width="154" height="28" rx="14" fill="#2b1d17" stroke="#4a342a"/>
+      <circle cx="496" cy="14" r="3.5" fill="#6ddeac"/>
+      <text x="507" y="18" fill="#f2dfd7">No Account Needed</text>
     </g>
   </g>
 </svg>
