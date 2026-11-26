@@ -8,7 +8,7 @@ on:
     branches:
       - main
     tags:
-      - "v[0-9]+.[0-9]+.[0-9]*"
+      - "v[0-9]*.[0-9]*.[0-9]*"
 
   # 2) Manual trigger from GitHub Actions UI
   workflow_dispatch:
@@ -214,15 +214,19 @@ jobs:
               -f sha="${GITHUB_SHA}"
           fi
 
-          EXTRA_FLAGS=()
           if [ "$PRERELEASE" = "true" ]; then
-            EXTRA_FLAGS+=(--prerelease)
+            gh release create "$TAG" \
+              "dist/${ARCHIVE}" \
+              "dist/SHA256SUMS" \
+              --verify-tag \
+              --title "MissNix ${TAG}" \
+              --generate-notes \
+              --prerelease
+          else
+            gh release create "$TAG" \
+              "dist/${ARCHIVE}" \
+              "dist/SHA256SUMS" \
+              --verify-tag \
+              --title "MissNix ${TAG}" \
+              --generate-notes
           fi
-
-          gh release create "$TAG" \
-            "dist/${ARCHIVE}" \
-            "dist/SHA256SUMS" \
-            --verify-tag \
-            --title "MissNix ${TAG}" \
-            --generate-notes \
-            "${EXTRA_FLAGS[@]}"
