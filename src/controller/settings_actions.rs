@@ -214,6 +214,8 @@ pub(super) fn apply_ui_scale_to_window(win: &AppWindow, state: &mut UiState, sca
     });
 
     let effective = (base * (f32::from(clamped) / 100.0)).clamp(0.5, 4.0);
+    state.applied_scale_factor = Some(effective);
+
     let phys = win.window().size();
     win.window()
         .dispatch_event(WindowEvent::ScaleFactorChanged {

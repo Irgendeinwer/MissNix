@@ -7,6 +7,7 @@ import {
     M3Button,
     M3FilterChip,
     M3LabeledInput,
+    M3ScrollBar,
     M3Select,
     M3Switch,
     SectionCard,
@@ -50,6 +51,8 @@ export component SettingsView inherits Rectangle {
     settings-scroll := ScrollView {
         width: 100%;
         height: 100%;
+        vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+        horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
 
         HorizontalLayout {
             width: settings-scroll.visible-width;
@@ -106,126 +109,142 @@ export component SettingsView inherits Rectangle {
                             color: Theme.on-surface;
                         }
 
-                        HorizontalLayout {
+                        VerticalLayout {
                             spacing: 8px;
                             alignment: start;
 
-                            AccentSwatch {
-                                swatch-color: #c6b8ff;
-                                label: "Iris";
-                                selected: root.pref-accent-preset == 0;
-                                clicked => {
-                                    root.apply-theme(root.pref-dark-mode, 0);
-                                    root.preferences-changed();
+                            HorizontalLayout {
+                                spacing: 8px;
+                                alignment: start;
+
+                                AccentSwatch {
+                                    swatch-color: #c6b8ff;
+                                    label: "Iris";
+                                    selected: root.pref-accent-preset == 0;
+                                    clicked => {
+                                        root.apply-theme(root.pref-dark-mode, 0);
+                                        root.preferences-changed();
+                                    }
+                                }
+                                AccentSwatch {
+                                    swatch-color: #76d0ff;
+                                    label: "Frost";
+                                    selected: root.pref-accent-preset == 1;
+                                    clicked => {
+                                        root.apply-theme(root.pref-dark-mode, 1);
+                                        root.preferences-changed();
+                                    }
+                                }
+                                AccentSwatch {
+                                    swatch-color: #6ddeac;
+                                    label: "Emerald";
+                                    selected: root.pref-accent-preset == 2;
+                                    clicked => {
+                                        root.apply-theme(root.pref-dark-mode, 2);
+                                        root.preferences-changed();
+                                    }
+                                }
+                                AccentSwatch {
+                                    swatch-color: #fdb354;
+                                    label: "Amber";
+                                    selected: root.pref-accent-preset == 3;
+                                    clicked => {
+                                        root.apply-theme(root.pref-dark-mode, 3);
+                                        root.preferences-changed();
+                                    }
                                 }
                             }
-                            AccentSwatch {
-                                swatch-color: #76d0ff;
-                                label: "Frost";
-                                selected: root.pref-accent-preset == 1;
-                                clicked => {
-                                    root.apply-theme(root.pref-dark-mode, 1);
-                                    root.preferences-changed();
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                alignment: start;
+
+                                AccentSwatch {
+                                    swatch-color: #ffa9ad;
+                                    label: "Coral";
+                                    selected: root.pref-accent-preset == 4;
+                                    clicked => {
+                                        root.apply-theme(root.pref-dark-mode, 4);
+                                        root.preferences-changed();
+                                    }
                                 }
-                            }
-                            AccentSwatch {
-                                swatch-color: #6ddeac;
-                                label: "Emerald";
-                                selected: root.pref-accent-preset == 2;
-                                clicked => {
-                                    root.apply-theme(root.pref-dark-mode, 2);
-                                    root.preferences-changed();
+                                AccentSwatch {
+                                    swatch-color: #ffad8d;
+                                    label: "Copper";
+                                    selected: root.pref-accent-preset == 5;
+                                    clicked => {
+                                        root.apply-theme(root.pref-dark-mode, 5);
+                                        root.preferences-changed();
+                                    }
                                 }
-                            }
-                            AccentSwatch {
-                                swatch-color: #fdb354;
-                                label: "Amber";
-                                selected: root.pref-accent-preset == 3;
-                                clicked => {
-                                    root.apply-theme(root.pref-dark-mode, 3);
-                                    root.preferences-changed();
+                                AccentSwatch {
+                                    swatch-color: #c4c4c4;
+                                    label: "Graphite";
+                                    selected: root.pref-accent-preset == 6;
+                                    clicked => {
+                                        root.apply-theme(root.pref-dark-mode, 6);
+                                        root.preferences-changed();
+                                    }
                                 }
-                            }
-                            AccentSwatch {
-                                swatch-color: #ffa9ad;
-                                label: "Coral";
-                                selected: root.pref-accent-preset == 4;
-                                clicked => {
-                                    root.apply-theme(root.pref-dark-mode, 4);
-                                    root.preferences-changed();
-                                }
-                            }
-                            AccentSwatch {
-                                swatch-color: #ffad8d;
-                                label: "Copper";
-                                selected: root.pref-accent-preset == 5;
-                                clicked => {
-                                    root.apply-theme(root.pref-dark-mode, 5);
-                                    root.preferences-changed();
-                                }
-                            }
-                            AccentSwatch {
-                                swatch-color: #c4c4c4;
-                                label: "Graphite";
-                                selected: root.pref-accent-preset == 6;
-                                clicked => {
-                                    root.apply-theme(root.pref-dark-mode, 6);
-                                    root.preferences-changed();
-                                }
-                            }
-                            AccentSwatch {
-                                swatch-color: Theme.custom-swatch;
-                                label: "Custom";
-                                selected: root.pref-accent-preset == 7;
-                                clicked => {
-                                    root.apply-theme(root.pref-dark-mode, 7);
-                                    root.preferences-changed();
+                                AccentSwatch {
+                                    swatch-color: Theme.custom-swatch;
+                                    label: "Custom";
+                                    selected: root.pref-accent-preset == 7;
+                                    clicked => {
+                                        root.apply-theme(root.pref-dark-mode, 7);
+                                        root.preferences-changed();
+                                    }
                                 }
                             }
                         }
 
                         // Custom Hex Seed Generator + Live Tonal Strip
-                        HorizontalLayout {
-                            spacing: 10px;
+                        VerticalLayout {
+                            spacing: 6px;
                             alignment: start;
 
-                            M3LabeledInput {
-                                width: 175px;
-                                placeholder: "#EA6C34";
-                                text <=> root.pref-custom-accent-hex;
-                                edited => {
-                                    root.custom-accent-changed(root.pref-custom-accent-hex, false);
-                                }
-                                accepted(val) => {
-                                    root.custom-accent-changed(val, true);
-                                }
-                            }
+                            HorizontalLayout {
+                                spacing: 10px;
+                                alignment: start;
 
-                            M3Button {
-                                y: (parent.height - self.height) / 2;
-                                variant: root.pref-accent-preset == 7 ? "filled" : "primary-tonal";
-                                text: "Apply Custom Hex";
-                                clicked => {
-                                    root.custom-accent-changed(root.pref-custom-accent-hex, true);
+                                M3LabeledInput {
+                                    width: 175px;
+                                    placeholder: "#EA6C34";
+                                    text <=> root.pref-custom-accent-hex;
+                                    edited => {
+                                        root.custom-accent-changed(root.pref-custom-accent-hex, false);
+                                    }
+                                    accepted(val) => {
+                                        root.custom-accent-changed(val, true);
+                                    }
                                 }
-                            }
 
-                            // Live 4-stop Material 3 Tonal Palette Preview Strip
-                            Rectangle {
-                                width: 124px;
-                                height: 32px;
-                                y: (parent.height - self.height) / 2;
-                                border-radius: 9px;
-                                border-width: 1px;
-                                border-color: Theme.outline;
-                                clip: true;
+                                M3Button {
+                                    y: (parent.height - self.height) / 2;
+                                    variant: root.pref-accent-preset == 7 ? "filled" : "primary-tonal";
+                                    text: "Apply Custom Hex";
+                                    clicked => {
+                                        root.custom-accent-changed(root.pref-custom-accent-hex, true);
+                                    }
+                                }
 
-                                HorizontalLayout {
-                                    spacing: 0px;
-                                    Rectangle { horizontal-stretch: 1; background: Theme.surface; }
-                                    Rectangle { horizontal-stretch: 1; background: Theme.surface-container-high; }
-                                    Rectangle { horizontal-stretch: 1; background: Theme.primary-container; }
-                                    Rectangle { horizontal-stretch: 1; background: Theme.primary; }
+                                // Live 4-stop Material 3 Tonal Palette Preview Strip
+                                Rectangle {
+                                    width: 124px;
+                                    height: 32px;
+                                    y: (parent.height - self.height) / 2;
+                                    border-radius: 9px;
+                                    border-width: 1px;
+                                    border-color: Theme.outline;
+                                    clip: true;
+
+                                    HorizontalLayout {
+                                        spacing: 0px;
+                                        Rectangle { horizontal-stretch: 1; background: Theme.surface; }
+                                        Rectangle { horizontal-stretch: 1; background: Theme.surface-container-high; }
+                                        Rectangle { horizontal-stretch: 1; background: Theme.primary-container; }
+                                        Rectangle { horizontal-stretch: 1; background: Theme.primary; }
+                                    }
                                 }
                             }
 
@@ -233,30 +252,26 @@ export component SettingsView inherits Rectangle {
                                 text: "Enter any #RRGGBB color to generate a matching dark & light tonal palette.";
                                 font-size: 11.5px;
                                 color: Theme.on-surface-muted;
-                                vertical-alignment: center;
-                                horizontal-stretch: 1;
-                                overflow: elide;
+                                wrap: word-wrap;
                             }
                         }
                     }
 
                     // HiDPI UI Scaling Selector
                     VerticalLayout {
-                        spacing: 6px;
+                        spacing: 7px;
                         alignment: start;
 
-                        HorizontalLayout {
-                            spacing: 10px;
-                            alignment: start;
+                        Text {
+                            text: "Interface Scale (HiDPI):";
+                            font-size: 12.5px;
+                            font-weight: 600;
+                            color: Theme.on-surface;
+                        }
 
-                            Text {
-                                text: "Interface Scale (HiDPI):";
-                                font-size: 12.5px;
-                                font-weight: 600;
-                                color: Theme.on-surface;
-                                vertical-alignment: center;
-                                width: 190px;
-                            }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            alignment: start;
 
                             M3FilterChip {
                                 label: "90%";
@@ -611,5 +626,15 @@ export component SettingsView inherits Rectangle {
                 }
             }
         }
+    }
+
+    M3ScrollBar {
+        x: parent.width - self.width - 2px;
+        y: 4px;
+        height: parent.height - 8px;
+        page-size: settings-scroll.visible-height;
+        maximum: max(0px, settings-scroll.viewport-height - settings-scroll.visible-height);
+        value: -settings-scroll.viewport-y;
+        scrolled(val) => { settings-scroll.viewport-y = -val; }
     }
 }

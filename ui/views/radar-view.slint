@@ -4,6 +4,7 @@ import { FolderRowData, ReleaseCardData } from "../models.slint";
 import {
     M3Button,
     M3FilterChip,
+    M3ScrollBar,
     M3SearchField,
     M3Select,
     M3Switch,
@@ -348,49 +349,67 @@ export component RadarView inherits VerticalLayout {
     }
 
     // Smooth Viewport-Culled Multi-Column Cover Grid (Zero Resize Jitter)
-    if root.releases.length > 0 : feed-scroll := ScrollView {
+    if root.releases.length > 0 : Rectangle {
         vertical-stretch: 1;
+        clip: true;
 
-        property <length> target-cell: root.pref-grid-density == 0 ? 170px
-                                     : root.pref-grid-density == 2 ? 236px
-                                     : 200px;
-        property <length> gap: 14px;
-        property <length> pad: 20px;
-        property <length> avail-w: max(320px, self.visible-width - 2 * self.pad);
-        property <int> cols: max(2, min(10, Math.floor((self.avail-w + self.gap) / (self.target-cell + self.gap))));
-        property <length> card-w: (self.avail-w - (self.cols - 1) * self.gap) / self.cols;
-        property <length> card-h: self.card-w + 76px;
-        property <int> total-rows: Math.ceil(root.releases.length / self.cols);
-        property <length> scroll-top: -self.viewport-y;
+        feed-scroll := ScrollView {
+            width: 100%;
+            height: 100%;
+            vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+            horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
 
-        content-width: self.visible-width;
-        content-height: max(self.visible-height, self.pad * 2 + self.total-rows * self.card-h + max(0, self.total-rows - 1) * self.gap);
+            property <length> target-cell: root.pref-grid-density == 0 ? 170px
+                                         : root.pref-grid-density == 2 ? 236px
+                                         : 200px;
+            property <length> gap: 14px;
+            property <length> pad: 20px;
+            property <length> avail-w: max(320px, self.visible-width - 2 * self.pad);
+            property <int> cols: max(2, min(10, Math.floor((self.avail-w + self.gap) / (self.target-cell + self.gap))));
+            property <length> card-w: (self.avail-w - (self.cols - 1) * self.gap) / self.cols;
+            property <length> card-h: self.card-w + 76px;
+            property <int> total-rows: Math.ceil(root.releases.length / self.cols);
+            property <length> scroll-top: -self.viewport-y;
 
-        for item[idx] in root.releases : Rectangle {
-            property <int> row-idx: Math.floor(idx / feed-scroll.cols);
-            property <int> col-idx: Math.mod(idx, feed-scroll.cols);
-            property <length> item-y: feed-scroll.pad + self.row-idx * (feed-scroll.card-h + feed-scroll.gap);
-            property <bool> in-viewport:
-                (self.item-y + feed-scroll.card-h >= feed-scroll.scroll-top - feed-scroll.card-h)
-                && (self.item-y <= feed-scroll.scroll-top + feed-scroll.visible-height + feed-scroll.card-h);
+            content-width: self.visible-width;
+            content-height: max(self.visible-height, self.pad * 2 + self.total-rows * self.card-h + max(0, self.total-rows - 1) * self.gap);
 
-            x: feed-scroll.pad + self.col-idx * (feed-scroll.card-w + feed-scroll.gap);
-            y: self.item-y;
-            width: feed-scroll.card-w;
-            height: feed-scroll.card-h;
+            for item[idx] in root.releases : Rectangle {
+                property <int> row-idx: Math.floor(idx / feed-scroll.cols);
+                property <int> col-idx: Math.mod(idx, feed-scroll.cols);
+                property <length> item-y: feed-scroll.pad + self.row-idx * (feed-scroll.card-h + feed-scroll.gap);
+                property <bool> in-viewport:
+                    (self.item-y + feed-scroll.card-h >= feed-scroll.scroll-top - feed-scroll.card-h)
+                    && (self.item-y <= feed-scroll.scroll-top + feed-scroll.visible-height + feed-scroll.card-h);
 
-            if self.in-viewport : ReleaseCard {
-                width: 100%;
-                height: 100%;
-                data: item;
-                selected: root.inspector-mode == 1 && root.selected-release-id == item.id;
-                playing-this-release: root.preview-active && root.preview-playing && root.preview-release-id == item.id;
+                x: feed-scroll.pad + self.col-idx * (feed-scroll.card-w + feed-scroll.gap);
+                y: self.item-y;
+                width: feed-scroll.card-w;
+                height: feed-scroll.card-h;
 
-                select-release(id) => { root.select-release(id); }
-                toggle-seen(id) => { root.toggle-release-seen(id); }
-                dismiss-release(id) => { root.dismiss-release(id); }
-                open-artist(aid) => { root.inspect-artist(aid); }
+                if self.in-viewport : ReleaseCard {
+                    width: 100%;
+                    height: 100%;
+                    data: item;
+                    selected: root.inspector-mode == 1 && root.selected-release-id == item.id;
+                    playing-this-release: root.preview-active && root.preview-playing && root.preview-release-id == item.id;
+
+                    select-release(id) => { root.select-release(id); }
+                    toggle-seen(id) => { root.toggle-release-seen(id); }
+                    dismiss-release(id) => { root.dismiss-release(id); }
+                    open-artist(aid) => { root.inspect-artist(aid); }
+                }
             }
+        }
+
+        M3ScrollBar {
+            x: parent.width - self.width - 2px;
+            y: 4px;
+            height: parent.height - 8px;
+            page-size: feed-scroll.visible-height;
+            maximum: max(0px, feed-scroll.viewport-height - feed-scroll.visible-height);
+            value: -feed-scroll.viewport-y;
+            scrolled(val) => { feed-scroll.viewport-y = -val; }
         }
     }
 }

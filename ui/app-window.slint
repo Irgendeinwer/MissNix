@@ -27,8 +27,8 @@ export {
 
 export component AppWindow inherits Window {
     title: "MissNix — Local Music Release Radar";
-    min-width: 980px;
-    min-height: 640px;
+    min-width: 820px;
+    min-height: 540px;
     preferred-width: 1400px;
     preferred-height: 880px;
     background: Theme.surface;
@@ -39,7 +39,7 @@ export component AppWindow inherits Window {
     // 0 = Release Radar, 1 = Tracked Artists, 2 = Library & Settings
     in-out property <int> active-view: 0;
     in property <int> unseen-badge-count: 0;
-    in property <string> library-summary-text: "0 tracked artists · 0 local albums";
+    in property <string> library-summary-text: "0 tracked artists\n0 local albums";
     in property <string> status-banner-text: "Ready";
     in property <bool> status-is-warning: false;
 

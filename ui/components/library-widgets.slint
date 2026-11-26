@@ -241,16 +241,19 @@ export component SearchCandidateRow inherits Rectangle {
 export component LocalAlbumItem inherits Rectangle {
     in property <LocalAlbumRowData> album;
 
-    height: 44px;
+    min-height: 44px;
+    height: max(44px, album-row.preferred-height);
     vertical-stretch: 0;
     border-radius: 10px;
     background: Theme.surface-container;
     border-width: 1px;
     border-color: Theme.outline-variant;
 
-    HorizontalLayout {
+    album-row := HorizontalLayout {
         padding-left: 12px;
         padding-right: 10px;
+        padding-top: 6px;
+        padding-bottom: 6px;
         spacing: 8px;
 
         VerticalLayout {
@@ -263,13 +266,13 @@ export component LocalAlbumItem inherits Rectangle {
                 font-size: 12.5px;
                 font-weight: 600;
                 color: Theme.on-surface;
-                overflow: elide;
+                wrap: word-wrap;
             }
             Text {
                 text: root.album.track-count-label;
                 font-size: 10.5px;
                 color: Theme.on-surface-muted;
-                overflow: elide;
+                wrap: word-wrap;
             }
         }
 
@@ -284,21 +287,25 @@ export component FolderItemRow inherits Rectangle {
     in property <FolderRowData> folder;
     callback remove-folder(int);
 
-    height: 54px;
+    min-height: 54px;
+    height: max(54px, folder-row.preferred-height);
     vertical-stretch: 0;
     border-radius: 10px;
     background: Theme.surface-container-low;
     border-width: 1px;
     border-color: Theme.outline-variant;
 
-    HorizontalLayout {
+    folder-row := HorizontalLayout {
         padding-left: 12px;
         padding-right: 10px;
+        padding-top: 8px;
+        padding-bottom: 8px;
         spacing: 12px;
 
         Image {
             width: 18px;
             height: 18px;
+            horizontal-stretch: 0;
             y: (parent.height - self.height) / 2;
             source: @image-url("../../assets/icons/folder.svg");
             colorize: Theme.primary;
@@ -315,13 +322,13 @@ export component FolderItemRow inherits Rectangle {
                 font-size: 13px;
                 font-weight: 600;
                 color: Theme.on-surface;
-                overflow: elide;
+                wrap: word-wrap;
             }
             Text {
                 text: root.folder.stats-label;
                 font-size: 11px;
                 color: Theme.on-surface-variant;
-                overflow: elide;
+                wrap: word-wrap;
             }
         }
 

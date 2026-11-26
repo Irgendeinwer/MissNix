@@ -47,6 +47,7 @@ pub struct UiState {
     pub release_model: Rc<VecModel<ReleaseCardData>>,
     pub artist_model: Rc<VecModel<ArtistRowData>>,
     pub base_scale_factor: Option<f32>,
+    pub applied_scale_factor: Option<f32>,
     pub last_auto_check: Instant,
 }
 
@@ -119,6 +120,7 @@ pub fn wire_controller(
         release_model,
         artist_model,
         base_scale_factor: None,
+        applied_scale_factor: None,
         last_auto_check: Instant::now(),
     }));
 
@@ -133,28 +135,52 @@ pub fn wire_controller(
     // Start persistent background cover-art & artist-avatar downloader/decoder worker
     spawn_image_worker(paths, engine, image_rx, app.as_weak(), &state);
 
-    // Capture native monitor scale factor once winit maps the window, then apply persisted UI scale
+    // Keep persisted UI scale synchronized once winit/Wayland maps & configures the surface.
+    // winit's `ensure_window()` and Wayland's post-map `fractional_scale` / `preferred_buffer_scale`
+    // events reset `window().scale_factor()` after startup, so we watch for window map and
+    // native monitor DPI changes and re-apply `base_scale * (ui_scale_percent / 100)`.
     let startup_scale_timer = Timer::default();
     {
         let weak = app.as_weak();
         let st = state.clone();
         let env_has_slint_scale = std::env::var_os("SLINT_SCALE_FACTOR").is_some();
-        startup_scale_timer.start(
-            TimerMode::SingleShot,
-            Duration::from_millis(25),
-            move || {
-                let Some(win) = weak.upgrade() else { return };
-                let mut guard = st.borrow_mut();
-                let native_sf = win.window().scale_factor();
-                if guard.base_scale_factor.is_none() {
-                    guard.base_scale_factor = Some(if native_sf > 0.0 { native_sf } else { 1.0 });
+        let allow_custom_scale = !env_has_slint_scale || cli_scale_override.is_some();
+        startup_scale_timer.start(TimerMode::Repeated, Duration::from_millis(80), move || {
+            if !allow_custom_scale {
+                return;
+            }
+            let Some(win) = weak.upgrade() else { return };
+            let phys = win.window().size();
+            if phys.width == 0 || phys.height == 0 {
+                return;
+            }
+            let current_sf = {
+                let sf = win.window().scale_factor();
+                if sf > 0.0 { sf } else { 1.0 }
+            };
+            let mut guard = st.borrow_mut();
+            let pct = guard.settings.ui_scale_percent.clamp(75, 250);
+
+            match guard.applied_scale_factor {
+                None => {
+                    guard.base_scale_factor = Some(current_sf);
+                    if pct != 100 {
+                        apply_ui_scale_to_window(&win, &mut guard, pct);
+                    } else {
+                        guard.applied_scale_factor = Some(current_sf);
+                    }
                 }
-                let pct = guard.settings.ui_scale_percent;
-                if pct != 100 && (!env_has_slint_scale || cli_scale_override.is_some()) {
-                    apply_ui_scale_to_window(&win, &mut guard, pct);
+                Some(applied) if (current_sf - applied).abs() > 0.005 => {
+                    guard.base_scale_factor = Some(current_sf);
+                    if pct != 100 {
+                        apply_ui_scale_to_window(&win, &mut guard, pct);
+                    } else {
+                        guard.applied_scale_factor = Some(current_sf);
+                    }
                 }
-            },
-        );
+                _ => {}
+            }
+        });
     }
 
     wire_radar_and_preview_callbacks(app, &state);

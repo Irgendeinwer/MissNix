@@ -112,19 +112,24 @@ export component M3Switch inherits Rectangle {
     in property <bool> enabled: true;
     callback toggled(bool);
 
-    height: 28px;
-    min-width: row.preferred-width;
+    height: max(28px, row.preferred-height);
+    min-width: 56px;
+    preferred-width: row.preferred-width;
     vertical-stretch: 0;
     horizontal-stretch: 0;
     opacity: root.enabled ? 1.0 : 0.45;
 
     row := HorizontalLayout {
+        width: 100%;
+        padding-top: 2px;
+        padding-bottom: 2px;
         spacing: 10px;
         alignment: start;
 
         track := Rectangle {
             width: 44px;
             height: 24px;
+            horizontal-stretch: 0;
             y: (parent.height - self.height) / 2;
             border-radius: 12px;
             background: root.checked
@@ -167,6 +172,8 @@ export component M3Switch inherits Rectangle {
             font-weight: 500;
             color: Theme.on-surface;
             vertical-alignment: center;
+            horizontal-stretch: 1;
+            wrap: word-wrap;
         }
     }
 
@@ -364,5 +371,122 @@ export component M3Spinner inherits Rectangle {
         y: (parent.height - self.height) / 2 + self.orbit * Math.sin(self.angle);
         border-radius: 2.5px;
         background: Theme.primary;
+    }
+}
+
+// =============================================================================
+// Solid Material 3 Vertical Scrollbar (Replaces Slint's 1px outline handle)
+// =============================================================================
+export component M3ScrollBar inherits Rectangle {
+    in property <length> page-size;
+    in property <length> maximum;
+    in property <length> value;
+    callback scrolled(length);
+
+    property <bool> active-bar: self.maximum > 1px && self.page-size > 1px;
+    property <length> pad-v: 3px;
+    property <length> track-h: max(24px, root.height - 2 * self.pad-v);
+    property <float> page-ratio: Math.clamp(self.page-size / max(1px, self.page-size + self.maximum), 0.06, 1.0);
+    property <length> thumb-h: max(min(32px, self.track-h), min(self.track-h, self.track-h * self.page-ratio));
+    property <length> travel: max(1px, self.track-h - self.thumb-h);
+    property <float> frac: Math.clamp(self.value / max(1px, self.maximum), 0.0, 1.0);
+    property <length> thumb-y: self.pad-v + self.travel * self.frac;
+
+    width: 11px;
+    visible: self.active-bar;
+    background: transparent;
+
+    // Subtle tonal track capsule on hover/drag
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: root.pad-v;
+        width: bar-touch.has-hover || bar-touch.pressed ? 7px : 6px;
+        height: root.track-h;
+        border-radius: self.width / 2;
+        background: bar-touch.has-hover || bar-touch.pressed
+            ? Theme.surface-container-highest.with-alpha(0.65)
+            : transparent;
+
+        animate background, width { duration: 120ms; }
+    }
+
+    // Solid rounded pill thumb (zero border outline)
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: root.thumb-y;
+        width: bar-touch.has-hover || bar-touch.pressed ? 7px : 6px;
+        height: root.thumb-h;
+        border-radius: self.width / 2;
+        border-width: 0px;
+        background: bar-touch.pressed ? Theme.primary
+                  : bar-touch.has-hover ? Theme.on-surface-variant
+                  : Theme.on-surface-muted.with-alpha(0.75);
+
+        animate background, width { duration: 120ms; }
+    }
+
+    bar-touch := TouchArea {
+        property <length> start-val: 0px;
+        property <length> start-max: 0px;
+        property <length> start-y: 0px;
+        property <bool> grabbed-thumb: false;
+
+        mouse-cursor: pointer;
+
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                self.start-max = root.maximum;
+                self.start-y = self.mouse-y;
+                if (self.mouse-y >= root.thumb-y && self.mouse-y <= root.thumb-y + root.thumb-h) {
+                    self.grabbed-thumb = true;
+                    self.start-val = root.value;
+                } else {
+                    self.grabbed-thumb = false;
+                    self.start-val = max(
+                        0px,
+                        min(
+                            root.maximum,
+                            root.maximum * ((self.mouse-y - root.pad-v - root.thumb-h / 2) / root.travel)
+                        )
+                    );
+                    root.scrolled(self.start-val);
+                }
+            }
+        }
+
+        moved => {
+            if (self.pressed && root.active-bar) {
+                if (self.start-max != root.maximum) {
+                    self.start-max = root.maximum;
+                    self.start-val = root.value;
+                    self.start-y = self.mouse-y;
+                }
+                if (self.grabbed-thumb) {
+                    root.scrolled(max(
+                        0px,
+                        min(
+                            root.maximum,
+                            self.start-val + root.maximum * ((self.mouse-y - self.start-y) / root.travel)
+                        )
+                    ));
+                } else {
+                    root.scrolled(max(
+                        0px,
+                        min(
+                            root.maximum,
+                            root.maximum * ((self.mouse-y - root.pad-v - root.thumb-h / 2) / root.travel)
+                        )
+                    ));
+                }
+            }
+        }
+
+        scroll-event(event) => {
+            if (event.delta-y != 0px && root.active-bar) {
+                root.scrolled(max(0px, min(root.maximum, root.value - event.delta-y)));
+                return accept;
+            }
+            reject
+        }
     }
 }

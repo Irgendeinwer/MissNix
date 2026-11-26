@@ -42,7 +42,7 @@ pub(super) fn refresh_folders_and_stats(win: &AppWindow, state: &UiState) {
         win.set_unseen_badge_count(stats.unseen_releases as i32);
         win.set_library_summary_text(
             format!(
-                "{} tracked {} · {} local {}",
+                "{} tracked {}\n{} local {}",
                 stats.tracked_artists,
                 pluralize(stats.tracked_artists as i64, "artist", "artists"),
                 stats.local_albums,

@@ -5,6 +5,7 @@ import {
     ArtistListRow,
     M3Button,
     M3FilterChip,
+    M3ScrollBar,
     M3SearchField,
     M3Spinner,
     SearchCandidateRow,
@@ -226,22 +227,41 @@ export component ArtistsView inherits HorizontalLayout {
             }
         }
 
-        if root.artists.length > 0 : ListView {
+        if root.artists.length > 0 : Rectangle {
             vertical-stretch: 1;
-            for art in root.artists : VerticalLayout {
-                padding-bottom: 6px;
-                ArtistListRow {
-                    artist: art;
-                    selected: root.inspector-mode == 2 && root.selected-artist-id == art.id;
-                    select-artist(id) => {
-                        root.select-artist(
-                            (root.inspector-mode == 2 && root.selected-artist-id == id) ? 0 : id
-                        );
+            clip: true;
+
+            artists-list := ListView {
+                width: 100%;
+                height: 100%;
+                vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+                horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+
+                for art in root.artists : VerticalLayout {
+                    padding-bottom: 6px;
+                    ArtistListRow {
+                        artist: art;
+                        selected: root.inspector-mode == 2 && root.selected-artist-id == art.id;
+                        select-artist(id) => {
+                            root.select-artist(
+                                (root.inspector-mode == 2 && root.selected-artist-id == id) ? 0 : id
+                            );
+                        }
+                        view-drops(id) => { root.view-artist-releases(id); }
+                        toggle-mute(id) => { root.toggle-artist-mute(id); }
+                        toggle-ignore(id) => { root.toggle-artist-ignore(id); }
                     }
-                    view-drops(id) => { root.view-artist-releases(id); }
-                    toggle-mute(id) => { root.toggle-artist-mute(id); }
-                    toggle-ignore(id) => { root.toggle-artist-ignore(id); }
                 }
+            }
+
+            M3ScrollBar {
+                x: parent.width - self.width;
+                y: 2px;
+                height: parent.height - 4px;
+                page-size: artists-list.visible-height;
+                maximum: max(0px, artists-list.viewport-height - artists-list.visible-height);
+                value: -artists-list.viewport-y;
+                scrolled(val) => { artists-list.viewport-y = -val; }
             }
         }
     }
