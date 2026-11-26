@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use rusqlite::types::ValueRef;
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, params};
 
 use crate::error::CoreResult;
 use crate::models::{ArtistSource, ArtistStatus, ReleaseState, ReleaseType};

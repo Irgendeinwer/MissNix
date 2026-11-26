@@ -7,7 +7,6 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/Irgendeinwer/MissNix"
-homepage = "https://github.com/Irgendeinwer/MissNix"
 
 [package]
 name = "missnix"
@@ -16,7 +15,6 @@ edition.workspace = true
 license.workspace = true
 description = "A desktop release radar for your local music library — scan your folders, track favorite artists, and miss nothing."
 repository.workspace = true
-homepage.workspace = true
 readme = "README.md"
 keywords = ["music", "releases", "slint", "musicbrainz", "deezer"]
 categories = ["multimedia::audio", "gui"]

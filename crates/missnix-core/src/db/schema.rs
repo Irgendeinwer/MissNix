@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::Connection;
 
 use crate::error::CoreResult;
 
