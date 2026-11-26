@@ -348,9 +348,9 @@ export component InspectorDrawer inherits Rectangle {
             y: 2px;
             height: parent.height - 4px;
             page-size: rel-scroll.visible-height;
-            maximum: max(0px, rel-scroll.viewport-height - rel-scroll.visible-height);
-            value: -rel-scroll.viewport-y;
-            scrolled(val) => { rel-scroll.viewport-y = -val; }
+            maximum: max(0px, rel-scroll.content-height - rel-scroll.visible-height);
+            value: -rel-scroll.content-y;
+            scrolled(val) => { rel-scroll.content-y = -val; }
         }
         }
     }
@@ -598,9 +598,9 @@ export component InspectorDrawer inherits Rectangle {
             y: 2px;
             height: parent.height - 4px;
             page-size: art-scroll.visible-height;
-            maximum: max(0px, art-scroll.viewport-height - art-scroll.visible-height);
-            value: -art-scroll.viewport-y;
-            scrolled(val) => { art-scroll.viewport-y = -val; }
+            maximum: max(0px, art-scroll.content-height - art-scroll.visible-height);
+            value: -art-scroll.content-y;
+            scrolled(val) => { art-scroll.content-y = -val; }
         }
         }
     }

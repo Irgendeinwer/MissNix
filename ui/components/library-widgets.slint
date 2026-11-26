@@ -241,7 +241,6 @@ export component SearchCandidateRow inherits Rectangle {
 export component LocalAlbumItem inherits Rectangle {
     in property <LocalAlbumRowData> album;
 
-    min-height: 44px;
     height: max(44px, album-row.preferred-height);
     vertical-stretch: 0;
     border-radius: 10px;
@@ -287,7 +286,6 @@ export component FolderItemRow inherits Rectangle {
     in property <FolderRowData> folder;
     callback remove-folder(int);
 
-    min-height: 54px;
     height: max(54px, folder-row.preferred-height);
     vertical-stretch: 0;
     border-radius: 10px;

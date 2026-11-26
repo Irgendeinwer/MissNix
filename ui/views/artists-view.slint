@@ -259,9 +259,9 @@ export component ArtistsView inherits HorizontalLayout {
                 y: 2px;
                 height: parent.height - 4px;
                 page-size: artists-list.visible-height;
-                maximum: max(0px, artists-list.viewport-height - artists-list.visible-height);
-                value: -artists-list.viewport-y;
-                scrolled(val) => { artists-list.viewport-y = -val; }
+                maximum: max(0px, artists-list.content-height - artists-list.visible-height);
+                value: -artists-list.content-y;
+                scrolled(val) => { artists-list.content-y = -val; }
             }
         }
     }

@@ -184,7 +184,7 @@ pub(super) struct FolderHint {
     pub(super) year: Option<i32>,
     /// True when path follows `<Artist>/<Album>/track` or `<Artist - Album>/track`
     /// rather than a loose dump directory.
-    structured_album_hierarchy: bool,
+    pub(super) structured_album_hierarchy: bool,
 }
 
 pub(super) fn infer_from_folder_hierarchy(root: &Path, file_path: &Path) -> FolderHint {

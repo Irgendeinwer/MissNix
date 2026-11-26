@@ -369,7 +369,7 @@ export component RadarView inherits VerticalLayout {
             property <length> card-w: (self.avail-w - (self.cols - 1) * self.gap) / self.cols;
             property <length> card-h: self.card-w + 76px;
             property <int> total-rows: Math.ceil(root.releases.length / self.cols);
-            property <length> scroll-top: -self.viewport-y;
+            property <length> scroll-top: -self.content-y;
 
             content-width: self.visible-width;
             content-height: max(self.visible-height, self.pad * 2 + self.total-rows * self.card-h + max(0, self.total-rows - 1) * self.gap);
@@ -407,9 +407,9 @@ export component RadarView inherits VerticalLayout {
             y: 4px;
             height: parent.height - 8px;
             page-size: feed-scroll.visible-height;
-            maximum: max(0px, feed-scroll.viewport-height - feed-scroll.visible-height);
-            value: -feed-scroll.viewport-y;
-            scrolled(val) => { feed-scroll.viewport-y = -val; }
+            maximum: max(0px, feed-scroll.content-height - feed-scroll.visible-height);
+            value: -feed-scroll.content-y;
+            scrolled(val) => { feed-scroll.content-y = -val; }
         }
     }
 }

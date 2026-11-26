@@ -13,7 +13,8 @@ use crate::error::{CoreError, CoreResult};
 use crate::models::{AppSettings, ArtistDiscoveryMode, ScanSummary};
 use crate::normalize::{
     collapse_whitespace, extract_primary_artist, fold_diacritics_and_symbols,
-    is_various_or_generic_artist, normalize_artist_name, normalize_release_title,
+    is_generic_bucket_folder, is_various_or_generic_artist, normalize_artist_name,
+    normalize_release_title,
 };
 
 pub use self::tags::is_valid_uuid;

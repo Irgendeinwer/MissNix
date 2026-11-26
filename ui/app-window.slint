@@ -327,6 +327,7 @@ export component AppWindow inherits Window {
                     }
 
                     SettingsView {
+                        active-view <=> root.active-view;
                         add-folder-path(a0) => { root.add-folder-path(a0); }
                         apply-theme(dark, accent) => { root.apply-theme(dark, accent); }
                         browse-for-folder => { root.browse-for-folder(); }

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::models::{AppSettings, ArtistDiscoveryMode, ArtistStatus, FeedQuery, ReleaseState};
+use crate::normalize::now_rfc3339_utc;
 use crate::scanner::{DiscoveredAlbumRecord, DiscoveredArtistRecord, ScanOutcome};
 
 use super::*;

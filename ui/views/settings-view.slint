@@ -14,6 +14,7 @@ import {
 } from "../components.slint";
 
 export component SettingsView inherits Rectangle {
+    in-out property <int> active-view;
     callback add-folder-path(string);
     callback apply-theme(bool, int);
     callback browse-for-folder();
@@ -633,8 +634,8 @@ export component SettingsView inherits Rectangle {
         y: 4px;
         height: parent.height - 8px;
         page-size: settings-scroll.visible-height;
-        maximum: max(0px, settings-scroll.viewport-height - settings-scroll.visible-height);
-        value: -settings-scroll.viewport-y;
-        scrolled(val) => { settings-scroll.viewport-y = -val; }
+        maximum: max(0px, settings-scroll.content-height - settings-scroll.visible-height);
+        value: -settings-scroll.content-y;
+        scrolled(val) => { settings-scroll.content-y = -val; }
     }
 }
