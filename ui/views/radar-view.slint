@@ -1,0 +1,396 @@
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { FolderRowData, ReleaseCardData } from "../models.slint";
+import {
+    M3Button,
+    M3FilterChip,
+    M3SearchField,
+    M3Select,
+    M3Switch,
+    ReleaseCard,
+    TonalBadge,
+} from "../components.slint";
+
+export component RadarView inherits VerticalLayout {
+    in-out property <int> active-view;
+    callback check-all-releases();
+    callback clear-artist-feed-filter();
+    callback dismiss-release(int);
+    callback feed-filters-changed();
+    in-out property <bool> feed-hide-owned;
+    in-out property <string> feed-search-text;
+    in-out property <int> feed-sort-index;
+    in-out property <int> feed-status-index;
+    in-out property <int> feed-type-index;
+    in property <int> filtered-artist-id;
+    in property <string> filtered-artist-name;
+    in property <string> filtered-artist-status;
+    callback inspect-artist(int);
+    in-out property <int> inspector-mode;
+    in property <bool> is-busy;
+    in property <[FolderRowData]> library-folders;
+    callback mark-all-seen();
+    callback navigate(int);
+    in-out property <int> pref-grid-density;
+    in property <bool> preview-active;
+    in property <bool> preview-playing;
+    in property <int> preview-release-id;
+    in property <[ReleaseCardData]> releases;
+    callback select-release(int);
+    in property <int> selected-release-id;
+    callback toggle-artist-ignore(int);
+    callback toggle-artist-mute(int);
+    callback toggle-release-seen(int);
+    in property <int> unseen-badge-count;
+
+    public function focus-search() {
+        feed-search-input.focus-input();
+    }
+
+    visible: root.active-view == 0;
+    width: 100%;
+    height: 100%;
+
+    // Top Desktop Filter Bar
+    Rectangle {
+        vertical-stretch: 0;
+        background: Theme.surface;
+
+        VerticalLayout {
+            padding-left: 20px;
+            padding-right: 20px;
+            padding-top: 14px;
+            padding-bottom: 12px;
+            spacing: 11px;
+            alignment: start;
+
+            HorizontalLayout {
+                spacing: 10px;
+
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 2px;
+                    Text {
+                        text: "Release Radar";
+                        font-size: 21px;
+                        font-weight: 800;
+                        color: Theme.on-surface;
+                    }
+                    Text {
+                        text: "New, upcoming, and catalog releases across your tracked artists";
+                        font-size: 12px;
+                        color: Theme.on-surface-variant;
+                    }
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                if root.filtered-artist-id > 0 : HorizontalLayout {
+                    spacing: 6px;
+
+                    TonalBadge {
+                        y: (parent.height - self.height) / 2;
+                        label: "ARTIST: \{root.filtered-artist-name}";
+                        badge-bg: Theme.primary-container;
+                        badge-fg: Theme.on-primary-container;
+                    }
+
+                    M3Button {
+                        y: (parent.height - self.height) / 2;
+                        compact: true;
+                        variant: root.filtered-artist-status == "muted" ? "primary-tonal" : "outlined";
+                        has-icon: true;
+                        icon: root.filtered-artist-status == "muted"
+                            ? @image-url("../../assets/icons/volume-on.svg")
+                            : @image-url("../../assets/icons/volume-off.svg");
+                        text: root.filtered-artist-status == "muted" ? "Unmute" : "Mute";
+                        clicked => { root.toggle-artist-mute(root.filtered-artist-id); }
+                    }
+
+                    M3Button {
+                        y: (parent.height - self.height) / 2;
+                        compact: true;
+                        variant: root.filtered-artist-status == "ignored" ? "primary-tonal" : "danger";
+                        has-icon: true;
+                        icon: @image-url("../../assets/icons/eye-off.svg");
+                        text: root.filtered-artist-status == "ignored" ? "Restore" : "Hide";
+                        clicked => { root.toggle-artist-ignore(root.filtered-artist-id); }
+                    }
+
+                    M3Button {
+                        y: (parent.height - self.height) / 2;
+                        compact: true;
+                        variant: "outlined";
+                        has-icon: true;
+                        icon: @image-url("../../assets/icons/close.svg");
+                        text: "Clear";
+                        clicked => { root.clear-artist-feed-filter(); }
+                    }
+                }
+
+                M3Switch {
+                    y: (parent.height - self.height) / 2;
+                    text: "Hide owned";
+                    checked <=> root.feed-hide-owned;
+                    toggled => { root.feed-filters-changed(); }
+                }
+
+                M3Button {
+                    y: (parent.height - self.height) / 2;
+                    variant: "primary-tonal";
+                    has-icon: true;
+                    icon: @image-url("../../assets/icons/done-all.svg");
+                    text: "Mark All Seen";
+                    enabled: root.unseen-badge-count > 0;
+                    clicked => { root.mark-all-seen(); }
+                }
+            }
+
+            // Unified Filter Row (Search + Status Chips + Type Chips + Sort)
+            HorizontalLayout {
+                spacing: 8px;
+
+                feed-search-input := M3SearchField {
+                    min-width: 170px;
+                    max-width: 290px;
+                    horizontal-stretch: 1;
+                    text <=> root.feed-search-text;
+                    placeholder: "Search artist or release...  (/)";
+                    edited => { root.feed-filters-changed(); }
+                }
+
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 0;
+
+                    HorizontalLayout {
+                        spacing: 5px;
+                        height: 32px;
+
+                        M3FilterChip {
+                            label: "All";
+                            selected: root.feed-status-index == 0;
+                            clicked => {
+                                root.feed-status-index = 0;
+                                root.feed-filters-changed();
+                            }
+                        }
+                        M3FilterChip {
+                            label: root.unseen-badge-count > 0
+                                ? "Unread (\{root.unseen-badge-count})"
+                                : "Unread";
+                            selected: root.feed-status-index == 1;
+                            clicked => {
+                                root.feed-status-index = 1;
+                                root.feed-filters-changed();
+                            }
+                        }
+                        M3FilterChip {
+                            label: "Upcoming";
+                            selected: root.feed-status-index == 2;
+                            clicked => {
+                                root.feed-status-index = 2;
+                                root.feed-filters-changed();
+                            }
+                        }
+
+                        Rectangle {
+                            width: 1px;
+                            height: 20px;
+                            y: 6px;
+                            background: Theme.outline-variant;
+                        }
+
+                        M3FilterChip {
+                            label: "All Types";
+                            selected: root.feed-type-index == 0;
+                            clicked => {
+                                root.feed-type-index = 0;
+                                root.feed-filters-changed();
+                            }
+                        }
+                        M3FilterChip {
+                            label: "Albums";
+                            selected: root.feed-type-index == 1;
+                            clicked => {
+                                root.feed-type-index = 1;
+                                root.feed-filters-changed();
+                            }
+                        }
+                        M3FilterChip {
+                            label: "EPs";
+                            selected: root.feed-type-index == 2;
+                            clicked => {
+                                root.feed-type-index = 2;
+                                root.feed-filters-changed();
+                            }
+                        }
+                        M3FilterChip {
+                            label: "Singles";
+                            selected: root.feed-type-index == 3;
+                            clicked => {
+                                root.feed-type-index = 3;
+                                root.feed-filters-changed();
+                            }
+                        }
+                    }
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                M3Select {
+                    width: 158px;
+                    height: 34px;
+                    y: (parent.height - self.height) / 2;
+                    model: ["Newest First", "Upcoming First", "Artist A–Z"];
+                    current-index <=> root.feed-sort-index;
+                    selected => { root.feed-filters-changed(); }
+                }
+            }
+        }
+
+        Rectangle {
+            y: parent.height - 1px;
+            width: 100%;
+            height: 1px;
+            background: Theme.outline-variant;
+        }
+    }
+
+    // Empty State when no releases match
+    if root.releases.length == 0 : VerticalLayout {
+        vertical-stretch: 1;
+        alignment: center;
+
+        HorizontalLayout {
+            alignment: center;
+            padding-left: 24px;
+            padding-right: 24px;
+
+            Rectangle {
+                max-width: 460px;
+                horizontal-stretch: 1;
+                height: 244px;
+                border-radius: 18px;
+                background: Theme.surface-container;
+                border-width: 1px;
+                border-color: Theme.outline-variant;
+
+                VerticalLayout {
+                    padding: 28px;
+                    spacing: 12px;
+                    alignment: center;
+
+                    HorizontalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: 44px;
+                            height: 44px;
+                            border-radius: 22px;
+                            background: Theme.primary-container;
+
+                            Image {
+                                width: 22px;
+                                height: 22px;
+                                x: 11px;
+                                y: 11px;
+                                source: @image-url("../../assets/icons/sparkles.svg");
+                                colorize: Theme.primary;
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: root.library-folders.length == 0
+                            ? "Add one or more local music folders to automatically discover your artists and track new albums, EPs, and singles."
+                            : "No releases match your active filters. Run a release check or broaden your status, type, or lookback filters.";
+                        font-size: 12px;
+                        color: Theme.on-surface-variant;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: 10px;
+
+                        if root.library-folders.length == 0 : M3Button {
+                            variant: "filled";
+                            has-icon: true;
+                            icon: @image-url("../../assets/icons/folder-plus.svg");
+                            text: "Add Music Folder";
+                            clicked => { root.navigate(2); }
+                        }
+
+                        if root.library-folders.length > 0 : M3Button {
+                            variant: "filled";
+                            has-icon: true;
+                            icon: @image-url("../../assets/icons/refresh.svg");
+                            text: "Check Releases Now";
+                            enabled: !root.is-busy;
+                            clicked => { root.check-all-releases(); }
+                        }
+
+                        if root.library-folders.length > 0 && (root.feed-status-index != 0 || root.feed-type-index != 0 || root.feed-search-text != "") : M3Button {
+                            variant: "tonal";
+                            text: "Reset Filters";
+                            clicked => {
+                                root.feed-status-index = 0;
+                                root.feed-type-index = 0;
+                                root.feed-search-text = "";
+                                root.feed-filters-changed();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Smooth Viewport-Culled Multi-Column Cover Grid (Zero Resize Jitter)
+    if root.releases.length > 0 : feed-scroll := ScrollView {
+        vertical-stretch: 1;
+
+        property <length> target-cell: root.pref-grid-density == 0 ? 170px
+                                     : root.pref-grid-density == 2 ? 236px
+                                     : 200px;
+        property <length> gap: 14px;
+        property <length> pad: 20px;
+        property <length> avail-w: max(320px, self.visible-width - 2 * self.pad);
+        property <int> cols: max(2, min(10, Math.floor((self.avail-w + self.gap) / (self.target-cell + self.gap))));
+        property <length> card-w: (self.avail-w - (self.cols - 1) * self.gap) / self.cols;
+        property <length> card-h: self.card-w + 76px;
+        property <int> total-rows: Math.ceil(root.releases.length / self.cols);
+        property <length> scroll-top: -self.viewport-y;
+
+        content-width: self.visible-width;
+        content-height: max(self.visible-height, self.pad * 2 + self.total-rows * self.card-h + max(0, self.total-rows - 1) * self.gap);
+
+        for item[idx] in root.releases : Rectangle {
+            property <int> row-idx: Math.floor(idx / feed-scroll.cols);
+            property <int> col-idx: Math.mod(idx, feed-scroll.cols);
+            property <length> item-y: feed-scroll.pad + self.row-idx * (feed-scroll.card-h + feed-scroll.gap);
+            property <bool> in-viewport:
+                (self.item-y + feed-scroll.card-h >= feed-scroll.scroll-top - feed-scroll.card-h)
+                && (self.item-y <= feed-scroll.scroll-top + feed-scroll.visible-height + feed-scroll.card-h);
+
+            x: feed-scroll.pad + self.col-idx * (feed-scroll.card-w + feed-scroll.gap);
+            y: self.item-y;
+            width: feed-scroll.card-w;
+            height: feed-scroll.card-h;
+
+            if self.in-viewport : ReleaseCard {
+                width: 100%;
+                height: 100%;
+                data: item;
+                selected: root.inspector-mode == 1 && root.selected-release-id == item.id;
+                playing-this-release: root.preview-active && root.preview-playing && root.preview-release-id == item.id;
+
+                select-release(id) => { root.select-release(id); }
+                toggle-seen(id) => { root.toggle-release-seen(id); }
+                dismiss-release(id) => { root.dismiss-release(id); }
+                open-artist(aid) => { root.inspect-artist(aid); }
+            }
+        }
+    }
+}

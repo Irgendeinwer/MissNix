@@ -1,0 +1,417 @@
+import { Theme } from "../theme.slint";
+import { M3IconButton } from "primitives.slint";
+
+// =============================================================================
+// Animated Live 4-Bar Audio Equalizer
+// =============================================================================
+export component EqualizerBars inherits Rectangle {
+    in property <bool> playing: false;
+    in property <float> level: 0.45;
+    in property <color> bar-color: Theme.primary;
+
+    width: 18px;
+    height: 16px;
+    vertical-stretch: 0;
+    horizontal-stretch: 0;
+
+    property <float> t: root.playing ? (animation-tick() / 110ms) : 0.0;
+    property <float> amp: root.playing ? max(0.28, min(1.0, root.level)) : 0.18;
+
+    HorizontalLayout {
+        spacing: 2px;
+        alignment: center;
+
+        Rectangle {
+            width: 3px;
+            property <float> h1: root.playing ? (0.30 + 0.70 * abs(Math.sin(root.t * 57deg)) * root.amp) : 0.22;
+            height: max(3px, 15px * self.h1);
+            y: parent.height - self.height;
+            border-radius: 1.5px;
+            background: root.bar-color;
+        }
+        Rectangle {
+            width: 3px;
+            property <float> h2: root.playing ? (0.35 + 0.65 * abs(Math.cos(root.t * 77deg)) * root.amp) : 0.35;
+            height: max(3px, 15px * self.h2);
+            y: parent.height - self.height;
+            border-radius: 1.5px;
+            background: root.bar-color;
+        }
+        Rectangle {
+            width: 3px;
+            property <float> h3: root.playing ? (0.28 + 0.72 * abs(Math.sin((root.t + 1.4) * 66deg)) * root.amp) : 0.25;
+            height: max(3px, 15px * self.h3);
+            y: parent.height - self.height;
+            border-radius: 1.5px;
+            background: root.bar-color;
+        }
+        Rectangle {
+            width: 3px;
+            property <float> h4: root.playing ? (0.25 + 0.68 * abs(Math.cos((root.t + 2.1) * 54deg)) * root.amp) : 0.20;
+            height: max(3px, 15px * self.h4);
+            y: parent.height - self.height;
+            border-radius: 1.5px;
+            background: root.bar-color;
+        }
+    }
+}
+
+// =============================================================================
+// Cover Artwork & Circular Artist Avatar
+// =============================================================================
+export component CoverArtwork inherits Rectangle {
+    in property <image> cover;
+    in property <bool> has-cover: false;
+    in property <string> monogram: "♪";
+    in property <int> accent-hue: 0;
+    in property <length> corner-radius: 12px;
+
+    border-radius: root.corner-radius;
+    clip: true;
+    background: root.accent-hue == 0 ? #2e2542
+              : root.accent-hue == 1 ? #1d3240
+              : root.accent-hue == 2 ? #23362c
+              : root.accent-hue == 3 ? #3e2731
+              : root.accent-hue == 4 ? #383020
+              : #25283d;
+
+    if !root.has-cover : Rectangle {
+        Rectangle {
+            width: parent.width * 0.70;
+            height: parent.height * 0.70;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            border-radius: self.width / 2;
+            border-width: 1.5px;
+            border-color: #ffffff.with-alpha(0.10);
+            background: #000000.with-alpha(0.18);
+        }
+
+        Rectangle {
+            width: parent.width * 0.36;
+            height: parent.height * 0.36;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            border-radius: self.width / 2;
+            background: Theme.primary.with-alpha(0.22);
+            border-width: 1px;
+            border-color: Theme.primary.with-alpha(0.45);
+
+            Text {
+                text: root.monogram;
+                font-size: max(12px, parent.width * 0.36);
+                font-weight: 700;
+                color: #f4effa;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    if root.has-cover : Image {
+        width: 100%;
+        height: 100%;
+        source: root.cover;
+        image-fit: ImageFit.cover;
+    }
+}
+
+export component ArtistAvatar inherits Rectangle {
+    in property <image> avatar;
+    in property <bool> has-avatar: false;
+    in property <string> monogram: "♪";
+    in property <int> accent-hue: 0;
+    in property <bool> dimmed: false;
+    in property <length> size: 40px;
+
+    width: root.size;
+    height: root.size;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    border-radius: root.size / 2;
+    clip: true;
+    opacity: root.dimmed ? 0.52 : 1.0;
+
+    background: root.accent-hue == 0 ? Theme.primary-container
+              : root.accent-hue == 1 ? (Theme.dark-mode ? #173647 : #dbeafe)
+              : root.accent-hue == 2 ? (Theme.dark-mode ? #173a2e : #d1fae5)
+              : root.accent-hue == 3 ? (Theme.dark-mode ? #422934 : #fce7f3)
+              : root.accent-hue == 4 ? (Theme.dark-mode ? #3e321e : #fef3c7)
+              : (Theme.dark-mode ? #282b42 : #e0e7ff);
+
+    if !root.has-avatar : Text {
+        width: 100%;
+        height: 100%;
+        text: root.monogram;
+        font-size: root.size * 0.35;
+        font-weight: 700;
+        color: Theme.on-surface;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    if root.has-avatar : Image {
+        width: 100%;
+        height: 100%;
+        source: root.avatar;
+        image-fit: ImageFit.cover;
+    }
+}
+
+// =============================================================================
+// Docked In-App 30s Audio Preview Mini-Player Bar
+// =============================================================================
+export component PreviewMiniPlayer inherits Rectangle {
+    in property <bool> active: false;
+    in property <bool> playing: false;
+    in property <bool> buffering: false;
+    in property <string> track-title: "";
+    in property <string> artist-name: "";
+    in property <string> release-title: "";
+    in property <image> cover;
+    in property <bool> has-cover: false;
+    in property <string> monogram: "♪";
+    in property <int> accent-hue: 0;
+    in property <float> progress: 0.0;
+    in property <string> elapsed-label: "0:00";
+    in property <string> duration-label: "0:30";
+    in property <float> level: 0.0;
+    in property <int> volume-pct: 80;
+
+    callback toggle-pause();
+    callback seek(float);
+    callback volume-changed(int);
+    callback stop-preview();
+    callback open-playing-release();
+
+    height: root.active ? 72px : 0px;
+    vertical-stretch: 0;
+    clip: true;
+    background: Theme.surface-container-high;
+
+    animate height { duration: 200ms; easing: cubic-bezier(0.2, 0.0, 0.0, 1.0); }
+
+    // Top accent border line
+    Rectangle {
+        x: 0px;
+        y: 0px;
+        width: 100%;
+        height: 1px;
+        background: Theme.outline;
+    }
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 14px;
+
+        // Track Artwork + Info (clickable to jump to release)
+        Rectangle {
+            min-width: 180px;
+            max-width: 290px;
+            horizontal-stretch: 1;
+
+            HorizontalLayout {
+                spacing: 11px;
+
+                CoverArtwork {
+                    width: 46px;
+                    height: 46px;
+                    y: (parent.height - self.height) / 2;
+                    cover: root.cover;
+                    has-cover: root.has-cover;
+                    monogram: root.monogram;
+                    accent-hue: root.accent-hue;
+                    corner-radius: 10px;
+                }
+
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 2px;
+                    horizontal-stretch: 1;
+
+                    HorizontalLayout {
+                        spacing: 7px;
+                        EqualizerBars {
+                            y: (parent.height - self.height) / 2;
+                            playing: root.playing;
+                            level: root.level;
+                            bar-color: Theme.primary;
+                        }
+                        Text {
+                            text: root.track-title;
+                            font-size: 13px;
+                            font-weight: 700;
+                            color: Theme.on-surface;
+                            overflow: elide;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                    }
+
+                    Text {
+                        text: root.release-title != ""
+                            ? "\{root.artist-name} · \{root.release-title}"
+                            : root.artist-name;
+                        font-size: 11.5px;
+                        color: Theme.on-surface-variant;
+                        overflow: elide;
+                    }
+                }
+            }
+
+            TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.open-playing-release(); }
+            }
+        }
+
+        // Center Transport + Interactive Seek Bar
+        HorizontalLayout {
+            horizontal-stretch: 2;
+            spacing: 12px;
+
+            M3IconButton {
+                size: 40px;
+                icon-size: 18px;
+                y: (parent.height - self.height) / 2;
+                filled-primary: true;
+                icon: root.playing
+                    ? @image-url("../../assets/icons/pause.svg")
+                    : @image-url("../../assets/icons/play.svg");
+                clicked => { root.toggle-pause(); }
+            }
+
+            Text {
+                text: root.buffering ? "..." : root.elapsed-label;
+                width: 32px;
+                font-size: 11px;
+                font-weight: 600;
+                color: Theme.on-surface-variant;
+                vertical-alignment: center;
+                horizontal-alignment: right;
+            }
+
+            // Interactive Seek Track (left-anchored progress fill + drag scrubbing)
+            seek-area := Rectangle {
+                horizontal-stretch: 1;
+                height: 28px;
+                y: (parent.height - self.height) / 2;
+
+                Rectangle {
+                    width: 100%;
+                    height: 6px;
+                    x: 0px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 3px;
+                    background: Theme.surface-container-highest;
+                    clip: true;
+
+                    Rectangle {
+                        x: 0px;
+                        y: 0px;
+                        width: parent.width * max(0.0, min(1.0, root.progress));
+                        height: 100%;
+                        border-radius: 3px;
+                        background: Theme.primary;
+                    }
+                }
+
+                // Scrubber thumb
+                Rectangle {
+                    width: seek-touch.has-hover || seek-touch.pressed ? 14px : 10px;
+                    height: self.width;
+                    x: max(0px, min(parent.width - self.width, parent.width * max(0.0, min(1.0, root.progress)) - self.width / 2));
+                    y: (parent.height - self.height) / 2;
+                    border-radius: self.width / 2;
+                    background: Theme.primary;
+
+                    animate width { duration: 100ms; }
+                }
+
+                seek-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.seek(max(0.0, min(1.0, self.mouse-x / parent.width)));
+                    }
+                    moved => {
+                        if (self.pressed) {
+                            root.seek(max(0.0, min(1.0, self.mouse-x / parent.width)));
+                        }
+                    }
+                }
+            }
+
+            Text {
+                text: root.duration-label;
+                width: 32px;
+                font-size: 11px;
+                color: Theme.on-surface-muted;
+                vertical-alignment: center;
+            }
+        }
+
+        // Right Volume Scrubber + Stop/Dismiss
+        HorizontalLayout {
+            spacing: 8px;
+            horizontal-stretch: 0;
+
+            M3IconButton {
+                size: 32px;
+                icon-size: 16px;
+                y: (parent.height - self.height) / 2;
+                icon: root.volume-pct == 0
+                    ? @image-url("../../assets/icons/volume-off.svg")
+                    : @image-url("../../assets/icons/volume-on.svg");
+                clicked => {
+                    root.volume-changed(root.volume-pct == 0 ? 80 : 0);
+                }
+            }
+
+            vol-bar := Rectangle {
+                width: 78px;
+                height: 26px;
+                y: (parent.height - self.height) / 2;
+
+                Rectangle {
+                    width: 100%;
+                    height: 5px;
+                    x: 0px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 2.5px;
+                    background: Theme.surface-container-highest;
+                    clip: true;
+
+                    Rectangle {
+                        x: 0px;
+                        y: 0px;
+                        width: parent.width * (root.volume-pct / 100.0);
+                        height: 100%;
+                        border-radius: 2.5px;
+                        background: Theme.on-surface-variant;
+                    }
+                }
+
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.volume-changed(Math.round(max(0.0, min(100.0, (self.mouse-x / parent.width) * 100.0))));
+                    }
+                    moved => {
+                        if (self.pressed) {
+                            root.volume-changed(Math.round(max(0.0, min(100.0, (self.mouse-x / parent.width) * 100.0))));
+                        }
+                    }
+                }
+            }
+
+            M3IconButton {
+                size: 32px;
+                icon-size: 15px;
+                y: (parent.height - self.height) / 2;
+                icon: @image-url("../../assets/icons/close.svg");
+                clicked => { root.stop-preview(); }
+            }
+        }
+    }
+}

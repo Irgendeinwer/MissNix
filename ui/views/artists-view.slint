@@ -1,0 +1,248 @@
+import { ListView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { ArtistRowData, SearchCandidateRowData } from "../models.slint";
+import {
+    ArtistListRow,
+    M3Button,
+    M3FilterChip,
+    M3SearchField,
+    M3Spinner,
+    SearchCandidateRow,
+} from "../components.slint";
+
+export component ArtistsView inherits HorizontalLayout {
+    in-out property <int> active-view;
+    callback add-artist-by-name(string);
+    callback add-search-candidate(int);
+    in-out property <int> artist-filter-index;
+    callback artist-filters-changed();
+    in property <[SearchCandidateRowData]> artist-search-candidates;
+    in-out property <string> artist-search-text;
+    in property <[ArtistRowData]> artists;
+    in-out property <int> inspector-mode;
+    in-out property <string> manual-artist-query;
+    callback search-external-artist(string);
+    in property <bool> searching-external-artists;
+    callback select-artist(int);
+    in property <int> selected-artist-id;
+    in-out property <bool> show-add-artist-bar;
+    callback toggle-artist-ignore(int);
+    callback toggle-artist-mute(int);
+    callback view-artist-releases(int);
+
+    public function focus-search() {
+        artist-search-input.focus-input();
+    }
+
+    visible: root.active-view == 1;
+    width: 100%;
+    height: 100%;
+    alignment: center;
+
+    VerticalLayout {
+        max-width: 1040px;
+        horizontal-stretch: 1;
+        height: 100%;
+        padding-left: 20px;
+        padding-right: 20px;
+        padding-top: 16px;
+        padding-bottom: 14px;
+        spacing: 12px;
+
+        HorizontalLayout {
+            spacing: 12px;
+            vertical-stretch: 0;
+
+            VerticalLayout {
+                alignment: center;
+                spacing: 2px;
+                Text {
+                    text: "Tracked Artists";
+                    font-size: 21px;
+                    font-weight: 800;
+                    color: Theme.on-surface;
+                }
+                Text {
+                    text: "Primary artists discovered from your library — click any artist to inspect, mute, hide, or override IDs";
+                    font-size: 12px;
+                    color: Theme.on-surface-variant;
+                }
+            }
+
+            Rectangle { horizontal-stretch: 1; }
+
+            M3Button {
+                y: (parent.height - self.height) / 2;
+                variant: root.show-add-artist-bar ? "outlined" : "filled";
+                has-icon: true;
+                icon: root.show-add-artist-bar
+                    ? @image-url("../../assets/icons/close.svg")
+                    : @image-url("../../assets/icons/plus.svg");
+                text: root.show-add-artist-bar ? "Close" : "Add Artist";
+                clicked => {
+                    root.show-add-artist-bar = !root.show-add-artist-bar;
+                }
+            }
+        }
+
+        // Collapsible Manual Artist Search & Add Card
+        if root.show-add-artist-bar : Rectangle {
+            vertical-stretch: 0;
+            border-radius: 14px;
+            background: Theme.surface-container;
+            border-width: 1px;
+            border-color: Theme.primary.with-alpha(0.45);
+
+            VerticalLayout {
+                padding: 14px;
+                spacing: 10px;
+                alignment: start;
+
+                HorizontalLayout {
+                    spacing: 10px;
+
+                    M3SearchField {
+                        horizontal-stretch: 1;
+                        text <=> root.manual-artist-query;
+                        placeholder: "Search Deezer & MusicBrainz for an artist to track...";
+                        accepted(val) => { root.search-external-artist(val); }
+                    }
+
+                    M3Button {
+                        y: (parent.height - self.height) / 2;
+                        variant: "filled";
+                        text: "Search Online";
+                        enabled: root.manual-artist-query != "" && !root.searching-external-artists;
+                        clicked => { root.search-external-artist(root.manual-artist-query); }
+                    }
+
+                    M3Button {
+                        y: (parent.height - self.height) / 2;
+                        variant: "tonal";
+                        text: "Add by Name";
+                        enabled: root.manual-artist-query != "";
+                        clicked => { root.add-artist-by-name(root.manual-artist-query); }
+                    }
+                }
+
+                if root.searching-external-artists : HorizontalLayout {
+                    spacing: 8px;
+                    M3Spinner { width: 16px; height: 16px; indeterminate: true; }
+                    Text {
+                        text: "Searching Deezer & MusicBrainz...";
+                        font-size: 12px;
+                        color: Theme.on-surface-variant;
+                        vertical-alignment: center;
+                    }
+                }
+
+                if root.artist-search-candidates.length > 0 : VerticalLayout {
+                    spacing: 6px;
+                    alignment: start;
+                    for cand in root.artist-search-candidates : SearchCandidateRow {
+                        candidate: cand;
+                        add-candidate(idx) => { root.add-search-candidate(idx); }
+                    }
+                }
+            }
+        }
+
+        // Artist Search & Material 3 Filter Chips
+        HorizontalLayout {
+            spacing: 10px;
+            vertical-stretch: 0;
+
+            artist-search-input := M3SearchField {
+                min-width: 190px;
+                max-width: 340px;
+                horizontal-stretch: 1;
+                text <=> root.artist-search-text;
+                placeholder: "Filter artists by name...  (/)";
+                edited => { root.artist-filters-changed(); }
+            }
+
+            VerticalLayout {
+                alignment: center;
+                horizontal-stretch: 0;
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    height: 32px;
+
+                    M3FilterChip {
+                        label: "All";
+                        selected: root.artist-filter-index == 0;
+                        clicked => {
+                            root.artist-filter-index = 0;
+                            root.artist-filters-changed();
+                        }
+                    }
+                    M3FilterChip {
+                        label: "Tracked";
+                        selected: root.artist-filter-index == 1;
+                        clicked => {
+                            root.artist-filter-index = 1;
+                            root.artist-filters-changed();
+                        }
+                    }
+                    M3FilterChip {
+                        label: "Muted";
+                        selected: root.artist-filter-index == 2;
+                        clicked => {
+                            root.artist-filter-index = 2;
+                            root.artist-filters-changed();
+                        }
+                    }
+                    M3FilterChip {
+                        label: "Ignored";
+                        selected: root.artist-filter-index == 3;
+                        clicked => {
+                            root.artist-filter-index = 3;
+                            root.artist-filters-changed();
+                        }
+                    }
+                    M3FilterChip {
+                        label: "Manual";
+                        selected: root.artist-filter-index == 4;
+                        clicked => {
+                            root.artist-filter-index = 4;
+                            root.artist-filters-changed();
+                        }
+                    }
+                }
+            }
+
+            Rectangle { horizontal-stretch: 1; }
+        }
+
+        if root.artists.length == 0 : Rectangle {
+            vertical-stretch: 1;
+            Text {
+                text: "No matching artists found. Scan your music folders or click 'Add Artist' above.";
+                font-size: 13px;
+                color: Theme.on-surface-muted;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        if root.artists.length > 0 : ListView {
+            vertical-stretch: 1;
+            for art in root.artists : VerticalLayout {
+                padding-bottom: 6px;
+                ArtistListRow {
+                    artist: art;
+                    selected: root.inspector-mode == 2 && root.selected-artist-id == art.id;
+                    select-artist(id) => {
+                        root.select-artist(
+                            (root.inspector-mode == 2 && root.selected-artist-id == id) ? 0 : id
+                        );
+                    }
+                    view-drops(id) => { root.view-artist-releases(id); }
+                    toggle-mute(id) => { root.toggle-artist-mute(id); }
+                    toggle-ignore(id) => { root.toggle-artist-ignore(id); }
+                }
+            }
+        }
+    }
+}

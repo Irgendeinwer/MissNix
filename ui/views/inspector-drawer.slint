@@ -1,0 +1,570 @@
+import { ScrollView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { ArtistRowData, LocalAlbumRowData, ReleaseCardData, TrackRowData } from "../models.slint";
+import {
+    ArtistAvatar,
+    CoverArtwork,
+    LocalAlbumItem,
+    M3Button,
+    M3IconButton,
+    M3LabeledInput,
+    M3Spinner,
+    TonalBadge,
+    TrackRow,
+} from "../components.slint";
+
+export component InspectorDrawer inherits Rectangle {
+    in-out property <int> active-view;
+    callback check-single-artist(int);
+    callback close-inspector();
+    callback delete-artist(int);
+    callback dismiss-release(int);
+    in-out property <string> edit-artist-deezer-id;
+    in-out property <string> edit-artist-mbid;
+    callback inspect-artist(int);
+    in-out property <int> inspector-mode;
+    in property <bool> is-busy;
+    in property <bool> loading-tracks;
+    callback open-external-url(string);
+    callback play-track-preview(int, int, int);
+    in property <bool> preview-active;
+    in property <bool> preview-buffering;
+    in property <int> preview-disc-number;
+    in property <float> preview-level;
+    in property <bool> preview-playing;
+    in property <int> preview-release-id;
+    in property <int> preview-track-number;
+    callback save-artist-provider-ids(int, string, string);
+    in property <ArtistRowData> selected-artist;
+    in property <int> selected-artist-id;
+    in property <[LocalAlbumRowData]> selected-artist-local-albums;
+    in property <ReleaseCardData> selected-release;
+    in property <string> selected-release-artist-status;
+    in property <int> selected-release-id;
+    in property <[TrackRowData]> selected-release-tracks;
+    callback toggle-artist-ignore(int);
+    callback toggle-artist-mute(int);
+    callback toggle-release-seen(int);
+    callback view-artist-releases(int);
+
+    property <bool> drawer-open:
+        (root.active-view == 0 || root.active-view == 1)
+        && ((root.inspector-mode == 1 && root.selected-release-id > 0)
+            || (root.inspector-mode == 2 && root.selected-artist-id > 0));
+    width: self.drawer-open ? 386px : 0px;
+    horizontal-stretch: 0;
+    background: Theme.surface-rail;
+    clip: true;
+
+    animate width { duration: 190ms; easing: cubic-bezier(0.2, 0.0, 0.0, 1.0); }
+
+    Rectangle {
+        x: 0px;
+        width: 1px;
+        height: 100%;
+        background: Theme.outline-variant;
+    }
+
+    // -----------------------------------------------------------------
+    // MODE 1: RELEASE DETAILS INSPECTOR (with Quick Artist Mute/Hide)
+    // -----------------------------------------------------------------
+    if self.drawer-open && root.inspector-mode == 1 : VerticalLayout {
+        width: 386px;
+        height: 100%;
+        padding: 18px;
+        spacing: 12px;
+
+        // Full-Width Sticky Header
+        HorizontalLayout {
+            width: 100%;
+            spacing: 8px;
+            vertical-stretch: 0;
+            Text {
+                text: "Release Details";
+                font-size: 14px;
+                font-weight: 700;
+                color: Theme.on-surface-variant;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+            M3IconButton {
+                size: 32px;
+                icon-size: 15px;
+                icon: @image-url("../../assets/icons/close.svg");
+                clicked => { root.close-inspector(); }
+            }
+        }
+
+        rel-scroll := ScrollView {
+            vertical-stretch: 1;
+
+            VerticalLayout {
+                width: rel-scroll.visible-width;
+                padding-right: 4px;
+                spacing: 12px;
+                alignment: start;
+
+                // High-res Artwork
+                HorizontalLayout {
+                    alignment: center;
+                    CoverArtwork {
+                        width: 224px;
+                        height: 224px;
+                        cover: root.selected-release.cover;
+                        has-cover: root.selected-release.has-cover;
+                        monogram: root.selected-release.monogram;
+                        accent-hue: root.selected-release.accent-hue;
+                        corner-radius: 14px;
+                    }
+                }
+
+                // Bounded Badges Row
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+                    vertical-stretch: 0;
+
+                    TonalBadge {
+                        label: root.selected-release.release-type;
+                        badge-bg: Theme.primary-container;
+                        badge-fg: Theme.on-primary-container;
+                    }
+
+                    if root.selected-release.upcoming : TonalBadge {
+                        label: "UPCOMING";
+                        badge-bg: Theme.success-container;
+                        badge-fg: Theme.on-success-container;
+                    }
+
+                    if root.selected-release.owned-locally : TonalBadge {
+                        label: "IN LIBRARY";
+                    }
+
+                    if root.selected-release.explicit : TonalBadge {
+                        label: "EXPLICIT";
+                        badge-bg: Theme.error-container;
+                        badge-fg: Theme.on-error-container;
+                    }
+
+                    TonalBadge {
+                        label: root.selected-release.provider-label;
+                    }
+                }
+
+                // Title, Clickable Artist & Release Date
+                VerticalLayout {
+                    spacing: 4px;
+                    alignment: start;
+                    vertical-stretch: 0;
+
+                    Text {
+                        text: root.selected-release.title;
+                        font-size: 18px;
+                        font-weight: 800;
+                        color: Theme.on-surface;
+                        wrap: word-wrap;
+                    }
+
+                    Rectangle {
+                        height: 22px;
+                        Text {
+                            width: 100%;
+                            height: 100%;
+                            text: root.selected-release.artist-name;
+                            font-size: 14px;
+                            font-weight: 600;
+                            color: insp-artist-touch.has-hover
+                                ? Theme.primary.brighter(0.15)
+                                : Theme.primary;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                        insp-artist-touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.inspect-artist(root.selected-release.artist-id); }
+                        }
+                    }
+
+                    Text {
+                        text: root.selected-release.release-date != ""
+                            ? "Released \{root.selected-release.release-date}"
+                            : "Release date TBA";
+                        font-size: 12px;
+                        color: Theme.on-surface-muted;
+                    }
+                }
+
+                // Release Actions (Seen / Dismiss)
+                HorizontalLayout {
+                    spacing: 8px;
+                    vertical-stretch: 0;
+
+                    M3Button {
+                        fill-width: true;
+                        variant: root.selected-release.unseen ? "filled" : "tonal";
+                        has-icon: true;
+                        icon: @image-url("../../assets/icons/check.svg");
+                        text: root.selected-release.unseen ? "Mark as Seen" : "Mark Unread";
+                        clicked => { root.toggle-release-seen(root.selected-release.id); }
+                    }
+
+                    M3Button {
+                        variant: "outlined";
+                        has-icon: true;
+                        icon: @image-url("../../assets/icons/eye-off.svg");
+                        text: "Dismiss";
+                        clicked => { root.dismiss-release(root.selected-release.id); }
+                    }
+                }
+
+                // Quick Artist Triage Row directly inside Release Details
+                HorizontalLayout {
+                    spacing: 6px;
+                    vertical-stretch: 0;
+
+                    M3Button {
+                        fill-width: true;
+                        compact: true;
+                        variant: root.selected-release-artist-status == "muted" ? "primary-tonal" : "outlined";
+                        has-icon: true;
+                        icon: root.selected-release-artist-status == "muted"
+                            ? @image-url("../../assets/icons/volume-on.svg")
+                            : @image-url("../../assets/icons/volume-off.svg");
+                        text: root.selected-release-artist-status == "muted" ? "Unmute Artist" : "Mute Artist";
+                        clicked => { root.toggle-artist-mute(root.selected-release.artist-id); }
+                    }
+
+                    M3Button {
+                        fill-width: true;
+                        compact: true;
+                        variant: root.selected-release-artist-status == "ignored" ? "primary-tonal" : "danger";
+                        has-icon: true;
+                        icon: @image-url("../../assets/icons/eye-off.svg");
+                        text: root.selected-release-artist-status == "ignored" ? "Restore Artist" : "Hide Artist";
+                        clicked => { root.toggle-artist-ignore(root.selected-release.artist-id); }
+                    }
+                }
+
+                if root.selected-release.external-url != "" || root.selected-release.musicbrainz-url != "" : HorizontalLayout {
+                    spacing: 8px;
+                    vertical-stretch: 0;
+
+                    if root.selected-release.external-url != "" : M3Button {
+                        fill-width: true;
+                        compact: true;
+                        variant: "outlined";
+                        has-icon: true;
+                        icon: @image-url("../../assets/icons/external.svg");
+                        text: "Deezer";
+                        clicked => { root.open-external-url(root.selected-release.external-url); }
+                    }
+
+                    if root.selected-release.musicbrainz-url != "" : M3Button {
+                        fill-width: true;
+                        compact: true;
+                        variant: "outlined";
+                        has-icon: true;
+                        icon: @image-url("../../assets/icons/external.svg");
+                        text: "MusicBrainz";
+                        clicked => { root.open-external-url(root.selected-release.musicbrainz-url); }
+                    }
+                }
+
+                Rectangle {
+                    height: 1px;
+                    vertical-stretch: 0;
+                    background: Theme.outline-variant;
+                }
+
+                // Tracklist Header & Rows
+                HorizontalLayout {
+                    spacing: 8px;
+                    vertical-stretch: 0;
+                    Text {
+                        text: "Tracklist  ·  Click 30s for In-App Preview";
+                        font-size: 12.5px;
+                        font-weight: 700;
+                        color: Theme.on-surface;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    if root.selected-release-tracks.length > 0 : Text {
+                        text: "\{root.selected-release-tracks.length}";
+                        font-size: 11px;
+                        color: Theme.on-surface-muted;
+                        vertical-alignment: center;
+                    }
+                }
+
+                if root.loading-tracks : HorizontalLayout {
+                    spacing: 8px;
+                    padding-top: 6px;
+                    vertical-stretch: 0;
+                    M3Spinner { width: 18px; height: 18px; indeterminate: true; }
+                    Text {
+                        text: "Loading tracklist...";
+                        font-size: 12px;
+                        color: Theme.on-surface-variant;
+                        vertical-alignment: center;
+                    }
+                }
+
+                if !root.loading-tracks && root.selected-release-tracks.length == 0 : Text {
+                    text: "Tracklist not yet available for this release.";
+                    font-size: 12px;
+                    color: Theme.on-surface-muted;
+                }
+
+                for trk in root.selected-release-tracks : TrackRow {
+                    track: trk;
+                    is-current-track: root.preview-active
+                        && root.preview-release-id == root.selected-release.id
+                        && root.preview-disc-number == trk.disc-number
+                        && root.preview-track-number == trk.track-number;
+                    is-playing: root.preview-playing;
+                    is-buffering: root.preview-buffering;
+                    audio-level: root.preview-level;
+                    play-preview(clicked-trk) => {
+                        root.play-track-preview(
+                            root.selected-release.id,
+                            clicked-trk.disc-number,
+                            clicked-trk.track-number
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // MODE 2: ARTIST INSPECTOR (Full-Width Sticky Header + Mute/Hide)
+    // -----------------------------------------------------------------
+    if self.drawer-open && root.inspector-mode == 2 : VerticalLayout {
+        width: 386px;
+        height: 100%;
+        padding: 18px;
+        spacing: 12px;
+
+        // Full-Width Sticky Header (Uses 100% of the 386px Panel!)
+        HorizontalLayout {
+            width: 100%;
+            spacing: 12px;
+            vertical-stretch: 0;
+
+            ArtistAvatar {
+                size: 46px;
+                y: (parent.height - self.height) / 2;
+                avatar: root.selected-artist.avatar;
+                has-avatar: root.selected-artist.has-avatar;
+                monogram: root.selected-artist.monogram;
+                accent-hue: root.selected-artist.accent-hue;
+            }
+
+            VerticalLayout {
+                alignment: center;
+                spacing: 4px;
+                horizontal-stretch: 1;
+
+                Text {
+                    text: root.selected-artist.name;
+                    font-size: 17px;
+                    font-weight: 800;
+                    color: Theme.on-surface;
+                    overflow: elide;
+                }
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+
+                    TonalBadge {
+                        label: root.selected-artist.status == "tracked" ? "TRACKED"
+                             : root.selected-artist.status == "muted" ? "MUTED"
+                             : "HIDDEN";
+                        badge-bg: root.selected-artist.status == "tracked" ? Theme.primary-container
+                                : root.selected-artist.status == "muted" ? Theme.warning-container
+                                : Theme.error-container;
+                        badge-fg: root.selected-artist.status == "tracked" ? Theme.on-primary-container
+                                : root.selected-artist.status == "muted" ? Theme.on-warning-container
+                                : Theme.on-error-container;
+                    }
+                }
+            }
+
+            M3IconButton {
+                y: (parent.height - self.height) / 2;
+                size: 32px;
+                icon-size: 15px;
+                icon: @image-url("../../assets/icons/close.svg");
+                clicked => { root.close-inspector(); }
+            }
+        }
+
+        art-scroll := ScrollView {
+            vertical-stretch: 1;
+
+            VerticalLayout {
+                width: art-scroll.visible-width;
+                padding-right: 4px;
+                spacing: 13px;
+                alignment: start;
+
+                if root.selected-artist.disambiguation != "" : Text {
+                    text: root.selected-artist.disambiguation;
+                    font-size: 12px;
+                    color: Theme.on-surface-variant;
+                    wrap: word-wrap;
+                }
+
+                Text {
+                    text: "\{root.selected-artist.source-label} · \{root.selected-artist.release-count} releases found";
+                    font-size: 12px;
+                    color: Theme.on-surface-muted;
+                    wrap: word-wrap;
+                }
+
+                // Prominent Quick Mute / Hide Artist Row
+                HorizontalLayout {
+                    spacing: 8px;
+                    vertical-stretch: 0;
+
+                    M3Button {
+                        fill-width: true;
+                        variant: root.selected-artist.status == "muted" ? "primary-tonal" : "outlined";
+                        has-icon: true;
+                        icon: root.selected-artist.status == "muted"
+                            ? @image-url("../../assets/icons/volume-on.svg")
+                            : @image-url("../../assets/icons/volume-off.svg");
+                        text: root.selected-artist.status == "muted" ? "Unmute Artist" : "Mute Artist";
+                        clicked => { root.toggle-artist-mute(root.selected-artist.id); }
+                    }
+
+                    M3Button {
+                        fill-width: true;
+                        variant: root.selected-artist.status == "ignored" ? "primary-tonal" : "danger";
+                        has-icon: true;
+                        icon: @image-url("../../assets/icons/eye-off.svg");
+                        text: root.selected-artist.status == "ignored" ? "Restore Artist" : "Hide Artist";
+                        clicked => { root.toggle-artist-ignore(root.selected-artist.id); }
+                    }
+                }
+
+                // Secondary Actions (Check Now / Filter Radar)
+                HorizontalLayout {
+                    spacing: 8px;
+                    vertical-stretch: 0;
+
+                    M3Button {
+                        fill-width: true;
+                        variant: "filled";
+                        has-icon: true;
+                        icon: @image-url("../../assets/icons/refresh.svg");
+                        text: "Check Now";
+                        enabled: !root.is-busy;
+                        clicked => { root.check-single-artist(root.selected-artist.id); }
+                    }
+
+                    M3Button {
+                        fill-width: true;
+                        variant: "tonal";
+                        has-icon: true;
+                        icon: @image-url("../../assets/icons/radar.svg");
+                        text: "Filter Radar";
+                        clicked => { root.view-artist-releases(root.selected-artist.id); }
+                    }
+                }
+
+                if root.selected-artist.external-url != "" : M3Button {
+                    fill-width: true;
+                    variant: "outlined";
+                    has-icon: true;
+                    icon: @image-url("../../assets/icons/external.svg");
+                    text: "Open Artist Page";
+                    clicked => { root.open-external-url(root.selected-artist.external-url); }
+                }
+
+                if root.selected-artist.is-manual : M3Button {
+                    fill-width: true;
+                    variant: "danger";
+                    has-icon: true;
+                    icon: @image-url("../../assets/icons/trash.svg");
+                    text: "Delete Manual Artist";
+                    clicked => { root.delete-artist(root.selected-artist.id); }
+                }
+
+                Rectangle {
+                    height: 1px;
+                    vertical-stretch: 0;
+                    background: Theme.outline-variant;
+                }
+
+                VerticalLayout {
+                    spacing: 3px;
+                    vertical-stretch: 0;
+                    Text {
+                        text: "Provider Identity Link";
+                        font-size: 13px;
+                        font-weight: 700;
+                        color: Theme.on-surface;
+                    }
+                    Text {
+                        text: "Auto-matched via tags & local albums. Override if two artists share the same name:";
+                        font-size: 11px;
+                        color: Theme.on-surface-muted;
+                        wrap: word-wrap;
+                    }
+                }
+
+                M3LabeledInput {
+                    label: "Deezer Artist ID";
+                    placeholder: "e.g. 9052";
+                    text <=> root.edit-artist-deezer-id;
+                }
+
+                M3LabeledInput {
+                    label: "MusicBrainz Artist MBID";
+                    placeholder: "UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)";
+                    text <=> root.edit-artist-mbid;
+                }
+
+                M3Button {
+                    fill-width: true;
+                    variant: "primary-tonal";
+                    has-icon: true;
+                    icon: @image-url("../../assets/icons/check.svg");
+                    text: "Save Provider IDs";
+                    clicked => {
+                        root.save-artist-provider-ids(
+                            root.selected-artist.id,
+                            root.edit-artist-mbid,
+                            root.edit-artist-deezer-id
+                        );
+                    }
+                }
+
+                Rectangle {
+                    height: 1px;
+                    vertical-stretch: 0;
+                    background: Theme.outline-variant;
+                }
+
+                Text {
+                    text: "Local Library Albums (\{root.selected-artist-local-albums.length})";
+                    font-size: 13px;
+                    font-weight: 700;
+                    color: Theme.on-surface;
+                }
+
+                if root.selected-artist-local-albums.length == 0 : Text {
+                    text: "No local albums indexed for this artist.";
+                    font-size: 11.5px;
+                    color: Theme.on-surface-muted;
+                }
+
+                for alb in root.selected-artist-local-albums : LocalAlbumItem {
+                    album: alb;
+                }
+            }
+        }
+    }
+}

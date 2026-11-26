@@ -1,0 +1,368 @@
+import { Theme } from "../theme.slint";
+
+// =============================================================================
+// Material 3 Navigation Rail Item (Vector SVG + Pill Highlight)
+// =============================================================================
+export component NavRailItem inherits Rectangle {
+    in property <string> label;
+    in property <image> icon;
+    in property <int> badge-count: 0;
+    in property <bool> active: false;
+    callback clicked();
+
+    height: 42px;
+    vertical-stretch: 0;
+    border-radius: 21px;
+    background: root.active
+        ? Theme.primary-container
+        : (touch.has-hover ? Theme.on-surface.with-alpha(0.06) : transparent);
+
+    animate background { duration: 150ms; easing: ease-out; }
+
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 12px;
+        spacing: 11px;
+
+        Image {
+            width: 18px;
+            height: 18px;
+            y: (parent.height - self.height) / 2;
+            source: root.icon;
+            colorize: root.active ? Theme.primary : Theme.on-surface-variant;
+            image-fit: ImageFit.contain;
+        }
+
+        Text {
+            text: root.label;
+            font-size: 13px;
+            font-weight: root.active ? 700 : 500;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+            color: root.active ? Theme.on-primary-container : Theme.on-surface-variant;
+        }
+
+        if root.badge-count > 0 : Rectangle {
+            width: max(22px, badge-txt.preferred-width + 10px);
+            height: 20px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 10px;
+            background: root.active ? Theme.primary : Theme.primary-container;
+
+            badge-txt := Text {
+                text: root.badge-count > 99 ? "99+" : "\{root.badge-count}";
+                color: root.active ? Theme.on-primary : Theme.on-primary-container;
+                font-size: 11px;
+                font-weight: 700;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component SectionCard inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle: "";
+
+    vertical-stretch: 0;
+    border-radius: 16px;
+    background: Theme.surface-container;
+    border-width: 1px;
+    border-color: Theme.outline-variant;
+
+    VerticalLayout {
+        padding: 20px;
+        spacing: 14px;
+        alignment: start;
+
+        VerticalLayout {
+            spacing: 3px;
+            alignment: start;
+            Text {
+                text: root.title;
+                font-size: 15px;
+                font-weight: 700;
+                color: Theme.on-surface;
+            }
+            if root.subtitle != "" : Text {
+                text: root.subtitle;
+                font-size: 12px;
+                color: Theme.on-surface-variant;
+                wrap: word-wrap;
+            }
+        }
+
+        @children
+    }
+}
+
+// =============================================================================
+// Material 3 Toggle Switch (Replaces std-widgets Switch so active theme applies)
+// =============================================================================
+export component M3Switch inherits Rectangle {
+    in-out property <bool> checked: false;
+    in property <string> text: "";
+    in property <bool> enabled: true;
+    callback toggled(bool);
+
+    height: 28px;
+    min-width: row.preferred-width;
+    vertical-stretch: 0;
+    horizontal-stretch: 0;
+    opacity: root.enabled ? 1.0 : 0.45;
+
+    row := HorizontalLayout {
+        spacing: 10px;
+        alignment: start;
+
+        track := Rectangle {
+            width: 44px;
+            height: 24px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 12px;
+            background: root.checked
+                ? (sw-touch.has-hover ? Theme.primary.brighter(0.08) : Theme.primary)
+                : (sw-touch.has-hover ? Theme.surface-container-highest.brighter(0.10) : Theme.surface-container-highest);
+            border-width: root.checked ? 0px : 1.5px;
+            border-color: sw-touch.has-hover ? Theme.on-surface-variant : Theme.outline;
+
+            animate background { duration: 150ms; easing: ease-out; }
+            animate border-color { duration: 150ms; easing: ease-out; }
+
+            thumb := Rectangle {
+                width: root.checked ? 18px : 14px;
+                height: root.checked ? 18px : 14px;
+                x: root.checked ? 23px : 5px;
+                y: (parent.height - self.height) / 2;
+                border-radius: self.height / 2;
+                background: root.checked
+                    ? Theme.on-primary
+                    : (sw-touch.has-hover ? Theme.on-surface : Theme.on-surface-variant);
+
+                animate x, width, height { duration: 160ms; easing: cubic-bezier(0.2, 0.0, 0.0, 1.0); }
+                animate background { duration: 150ms; }
+
+                if root.checked : Image {
+                    width: 11px;
+                    height: 11px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    source: @image-url("../../assets/icons/check.svg");
+                    colorize: Theme.primary;
+                    image-fit: ImageFit.contain;
+                }
+            }
+        }
+
+        if root.text != "" : Text {
+            text: root.text;
+            font-size: 12.5px;
+            font-weight: 500;
+            color: Theme.on-surface;
+            vertical-alignment: center;
+        }
+    }
+
+    sw-touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled(root.checked);
+        }
+    }
+}
+
+// =============================================================================
+// Material 3 Dropdown Select (Replaces std-widgets ComboBox)
+// =============================================================================
+export component M3Select inherits Rectangle {
+    in property <[string]> model;
+    in-out property <int> current-index: 0;
+    in property <bool> enabled: true;
+    out property <string> current-value: (root.current-index >= 0 && root.current-index < root.model.length)
+        ? root.model[root.current-index]
+        : "";
+    callback selected(string);
+
+    height: 36px;
+    min-width: 140px;
+    vertical-stretch: 0;
+    border-radius: 10px;
+    background: sel-touch.has-hover ? Theme.surface-container-highest : Theme.surface-container-high;
+    border-width: 1px;
+    border-color: sel-touch.has-hover ? Theme.primary.with-alpha(0.65) : Theme.outline;
+    opacity: root.enabled ? 1.0 : 0.45;
+
+    animate background { duration: 120ms; }
+    animate border-color { duration: 120ms; }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 10px;
+        spacing: 8px;
+
+        Text {
+            text: root.current-value;
+            font-size: 12.5px;
+            font-weight: 500;
+            color: Theme.on-surface;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+
+        Image {
+            width: 15px;
+            height: 15px;
+            y: (parent.height - self.height) / 2;
+            source: @image-url("../../assets/icons/chevron-down.svg");
+            colorize: sel-touch.has-hover ? Theme.primary : Theme.on-surface-variant;
+            image-fit: ImageFit.contain;
+        }
+    }
+
+    sel-touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { popup.show(); }
+    }
+
+    popup := PopupWindow {
+        x: 0px;
+        y: root.height + 4px;
+        width: root.width;
+        height: root.model.length * 34px + 10px;
+        close-policy: close-on-click-outside;
+
+        Rectangle {
+            width: 100%;
+            height: 100%;
+            border-radius: 12px;
+            background: Theme.surface-container-high;
+            border-width: 1px;
+            border-color: Theme.outline;
+            drop-shadow-blur: 14px;
+            drop-shadow-offset-y: 4px;
+            drop-shadow-color: #000000.with-alpha(0.32);
+
+            VerticalLayout {
+                padding: 5px;
+                spacing: 0px;
+                alignment: start;
+
+                for item[idx] in root.model : Rectangle {
+                    height: 34px;
+                    border-radius: 8px;
+                    background: idx == root.current-index
+                        ? Theme.primary-container
+                        : (opt-touch.has-hover ? Theme.surface-container-highest : transparent);
+
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 8px;
+
+                        Text {
+                            text: item;
+                            font-size: 12.5px;
+                            font-weight: idx == root.current-index ? 700 : 500;
+                            color: idx == root.current-index ? Theme.on-primary-container : Theme.on-surface;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                            overflow: elide;
+                        }
+
+                        if idx == root.current-index : Image {
+                            width: 13px;
+                            height: 13px;
+                            y: (parent.height - self.height) / 2;
+                            source: @image-url("../../assets/icons/check.svg");
+                            colorize: Theme.on-primary-container;
+                            image-fit: ImageFit.contain;
+                        }
+                    }
+
+                    opt-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.current-index = idx;
+                            root.selected(item);
+                            popup.close();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Material 3 Linear Progress Bar & Spinner (Theme.primary accented)
+// =============================================================================
+export component M3ProgressBar inherits Rectangle {
+    in property <float> progress: 0.0;
+    in property <bool> indeterminate: false;
+
+    height: 5px;
+    vertical-stretch: 0;
+    border-radius: self.height / 2;
+    background: Theme.surface-container-highest;
+    clip: true;
+
+    property <float> sweep: Math.mod(animation-tick() / 1100ms, 1.0);
+
+    Rectangle {
+        x: root.indeterminate
+            ? (parent.width * (root.sweep * 1.4 - 0.4))
+            : 0px;
+        y: 0px;
+        width: root.indeterminate
+            ? parent.width * 0.40
+            : parent.width * Math.clamp(root.progress, 0.0, 1.0);
+        height: parent.height;
+        border-radius: parent.border-radius;
+        background: Theme.primary;
+    }
+}
+
+export component M3Spinner inherits Rectangle {
+    in property <bool> indeterminate: true;
+
+    width: 16px;
+    height: 16px;
+    vertical-stretch: 0;
+    horizontal-stretch: 0;
+    background: transparent;
+
+    property <float> phase: Math.mod(animation-tick() / 900ms, 1.0);
+
+    Rectangle {
+        width: parent.width;
+        height: parent.height;
+        x: 0px;
+        y: 0px;
+        border-radius: self.width / 2;
+        border-width: 2px;
+        border-color: Theme.primary.with-alpha(0.26);
+        background: transparent;
+    }
+
+    Rectangle {
+        property <angle> angle: root.phase * 1turn;
+        property <length> orbit: (parent.width - 5px) / 2;
+        width: 5px;
+        height: 5px;
+        x: (parent.width - self.width) / 2 + self.orbit * Math.cos(self.angle);
+        y: (parent.height - self.height) / 2 + self.orbit * Math.sin(self.angle);
+        border-radius: 2.5px;
+        background: Theme.primary;
+    }
+}

@@ -1,0 +1,338 @@
+import { Theme } from "../theme.slint";
+import {
+    ArtistRowData,
+    FolderRowData,
+    LocalAlbumRowData,
+    SearchCandidateRowData,
+} from "../models.slint";
+import { ArtistAvatar } from "media.slint";
+import { M3Button, M3IconButton, TonalBadge } from "primitives.slint";
+
+// =============================================================================
+// Uncrowded, Balanced Material 3 Tracked Artist List Row
+// =============================================================================
+export component ArtistListRow inherits Rectangle {
+    in property <ArtistRowData> artist;
+    in property <bool> selected: false;
+
+    callback select-artist(int);
+    callback view-drops(int);
+    callback toggle-mute(int);
+    callback toggle-ignore(int);
+
+    height: 60px;
+    vertical-stretch: 0;
+    border-radius: 12px;
+    background: root.selected
+        ? Theme.surface-container-high
+        : (row-touch.has-hover ? Theme.surface-container-high : Theme.surface-container);
+    border-width: root.selected ? 1.5px : 1px;
+    border-color: root.selected
+        ? Theme.primary
+        : (row-touch.has-hover ? Theme.outline : Theme.outline-variant);
+
+    animate background { duration: 120ms; easing: ease-out; }
+    animate border-color { duration: 120ms; easing: ease-out; }
+
+    row-touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.select-artist(root.artist.id); }
+    }
+
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 12px;
+        spacing: 13px;
+
+        ArtistAvatar {
+            y: (parent.height - self.height) / 2;
+            size: 40px;
+            avatar: root.artist.avatar;
+            has-avatar: root.artist.has-avatar;
+            monogram: root.artist.monogram;
+            accent-hue: root.artist.accent-hue;
+            dimmed: root.artist.status != "tracked";
+        }
+
+        // Primary Name & Clean Subtitle Column
+        VerticalLayout {
+            alignment: center;
+            spacing: 3px;
+            horizontal-stretch: 1;
+
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+
+                Text {
+                    text: root.artist.name;
+                    font-size: 14px;
+                    font-weight: 700;
+                    color: root.artist.status == "ignored"
+                        ? Theme.on-surface-muted
+                        : Theme.on-surface;
+                    overflow: elide;
+                    vertical-alignment: center;
+                }
+
+                if root.artist.is-manual : TonalBadge {
+                    y: (parent.height - self.height) / 2;
+                    label: "MANUAL";
+                    badge-bg: Theme.primary-container.with-alpha(0.65);
+                    badge-fg: Theme.on-primary-container;
+                }
+
+                if root.artist.status == "muted" : TonalBadge {
+                    y: (parent.height - self.height) / 2;
+                    label: "MUTED";
+                    badge-bg: Theme.warning-container;
+                    badge-fg: Theme.on-warning-container;
+                }
+
+                if root.artist.status == "ignored" : TonalBadge {
+                    y: (parent.height - self.height) / 2;
+                    label: "IGNORED";
+                    badge-bg: Theme.error-container;
+                    badge-fg: Theme.on-error-container;
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 6px;
+                alignment: start;
+
+                Text {
+                    text: root.artist.disambiguation != ""
+                        ? "\{root.artist.disambiguation}  ·  \{root.artist.source-label}"
+                        : root.artist.source-label;
+                    font-size: 11.5px;
+                    color: Theme.on-surface-variant;
+                    overflow: elide;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // Right-aligned compact metadata & non-stretching action cluster
+        if root.artist.unseen-count > 0 : Rectangle {
+            width: drops-txt.preferred-width + 16px;
+            height: 24px;
+            y: (parent.height - self.height) / 2;
+            horizontal-stretch: 0;
+            border-radius: 12px;
+            background: drops-touch.has-hover ? Theme.primary : Theme.primary-container;
+
+            animate background { duration: 115ms; }
+
+            drops-txt := Text {
+                text: "\{root.artist.unseen-count} new";
+                font-size: 11px;
+                font-weight: 700;
+                color: drops-touch.has-hover ? Theme.on-primary : Theme.on-primary-container;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            drops-touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.view-drops(root.artist.id); }
+            }
+        }
+
+        Text {
+            text: root.artist.last-checked;
+            width: 86px;
+            horizontal-stretch: 0;
+            font-size: 11px;
+            color: Theme.on-surface-muted;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        // Compact M3 Icon Toggle Buttons (Mute & Ignore — clean & uncrowded!)
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 0;
+
+            HorizontalLayout {
+                spacing: 4px;
+                height: 32px;
+
+                M3IconButton {
+                    size: 32px;
+                    icon-size: 16px;
+                    active: root.artist.status == "muted";
+                    icon: root.artist.status == "muted"
+                        ? @image-url("../../assets/icons/volume-off.svg")
+                        : @image-url("../../assets/icons/volume-on.svg");
+                    clicked => { root.toggle-mute(root.artist.id); }
+                }
+
+                M3IconButton {
+                    size: 32px;
+                    icon-size: 16px;
+                    danger: root.artist.status == "ignored";
+                    active: root.artist.status == "ignored";
+                    icon: @image-url("../../assets/icons/eye-off.svg");
+                    clicked => { root.toggle-ignore(root.artist.id); }
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Search Candidate, Local Album, Folder Row & Section Card
+// =============================================================================
+export component SearchCandidateRow inherits Rectangle {
+    in property <SearchCandidateRowData> candidate;
+    callback add-candidate(int);
+
+    height: 48px;
+    vertical-stretch: 0;
+    border-radius: 10px;
+    background: Theme.surface-container-low;
+    border-width: 1px;
+    border-color: Theme.outline-variant;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 10px;
+        spacing: 10px;
+
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            spacing: 2px;
+
+            Text {
+                text: root.candidate.name;
+                font-size: 13px;
+                font-weight: 700;
+                color: Theme.on-surface;
+                overflow: elide;
+            }
+            if root.candidate.subtitle != "" : Text {
+                text: root.candidate.subtitle;
+                font-size: 11px;
+                color: Theme.on-surface-variant;
+                overflow: elide;
+            }
+        }
+
+        TonalBadge {
+            y: (parent.height - self.height) / 2;
+            label: root.candidate.source-badge;
+        }
+
+        M3Button {
+            y: (parent.height - self.height) / 2;
+            compact: true;
+            variant: "filled";
+            has-icon: true;
+            icon: @image-url("../../assets/icons/plus.svg");
+            text: "Track";
+            clicked => { root.add-candidate(root.candidate.index); }
+        }
+    }
+}
+
+export component LocalAlbumItem inherits Rectangle {
+    in property <LocalAlbumRowData> album;
+
+    height: 44px;
+    vertical-stretch: 0;
+    border-radius: 10px;
+    background: Theme.surface-container;
+    border-width: 1px;
+    border-color: Theme.outline-variant;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 10px;
+        spacing: 8px;
+
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            spacing: 2px;
+
+            Text {
+                text: root.album.title;
+                font-size: 12.5px;
+                font-weight: 600;
+                color: Theme.on-surface;
+                overflow: elide;
+            }
+            Text {
+                text: root.album.track-count-label;
+                font-size: 10.5px;
+                color: Theme.on-surface-muted;
+                overflow: elide;
+            }
+        }
+
+        if root.album.year-label != "" : TonalBadge {
+            y: (parent.height - self.height) / 2;
+            label: root.album.year-label;
+        }
+    }
+}
+
+export component FolderItemRow inherits Rectangle {
+    in property <FolderRowData> folder;
+    callback remove-folder(int);
+
+    height: 54px;
+    vertical-stretch: 0;
+    border-radius: 10px;
+    background: Theme.surface-container-low;
+    border-width: 1px;
+    border-color: Theme.outline-variant;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 10px;
+        spacing: 12px;
+
+        Image {
+            width: 18px;
+            height: 18px;
+            y: (parent.height - self.height) / 2;
+            source: @image-url("../../assets/icons/folder.svg");
+            colorize: Theme.primary;
+            image-fit: ImageFit.contain;
+        }
+
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            spacing: 2px;
+
+            Text {
+                text: root.folder.path;
+                font-size: 13px;
+                font-weight: 600;
+                color: Theme.on-surface;
+                overflow: elide;
+            }
+            Text {
+                text: root.folder.stats-label;
+                font-size: 11px;
+                color: Theme.on-surface-variant;
+                overflow: elide;
+            }
+        }
+
+        M3Button {
+            y: (parent.height - self.height) / 2;
+            compact: true;
+            variant: "outlined";
+            has-icon: true;
+            icon: @image-url("../../assets/icons/trash.svg");
+            text: "Remove";
+            clicked => { root.remove-folder(root.folder.id); }
+        }
+    }
+}
