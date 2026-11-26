@@ -7,12 +7,14 @@
 [![CI](https://github.com/Irgendeinwer/MissNix/actions/workflows/ci.yml/badge.svg)](https://github.com/Irgendeinwer/MissNix/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Irgendeinwer/MissNix?include_prereleases&label=release&color=7c66b8)](https://github.com/Irgendeinwer/MissNix/releases)
 [![Nix Flake](https://img.shields.io/badge/Nix-Flake-5277C3?logo=nixos&logoColor=white)](flake.nix)
-[![Rust](https://img.shields.io/badge/Rust-2021-d0bcff?logo=rust&logoColor=white)](Cargo.toml)
+[![Rust](https://img.shields.io/badge/Rust-2024-d0bcff?logo=rust&logoColor=white)](Cargo.toml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-34d399)](LICENSE)
 
 </div>
 
-**MissNix** scans your local music folders, builds a clean list of the artists you listen to, and checks **Deezer** and **MusicBrainz** for new and upcoming albums, EPs, and singles — hiding releases you already own locally and playing 30-second previews directly in the app.
+**A desktop release radar for your local music library — scan your folders, track favorite artists, and miss nothing.**
+
+MissNix indexes the artists in your local audio collection and checks **Deezer** and **MusicBrainz** for new and upcoming albums, EPs, and singles — hiding releases you already own locally and playing 30-second previews directly in the app.
 
 <div align="center">
   <img src="assets/docs/ui-preview.svg" alt="MissNix Desktop Interface" width="100%" />
@@ -67,18 +69,23 @@ Add to a NixOS or Home Manager flake configuration:
 }
 ```
 
-### Prebuilt Release Archives
+### Prebuilt Linux Binaries (AppImage & Tarball)
 
-Download the latest archive from [**Releases**](https://github.com/Irgendeinwer/MissNix/releases) and optionally verify its cryptographic SLSA build provenance with the GitHub CLI:
+Download the portable **AppImage** or standalone `.tar.gz` archive from [**Releases**](https://github.com/Irgendeinwer/MissNix/releases):
 
 ```bash
-gh attestation verify missnix-v*-x86_64-unknown-linux-gnu.tar.gz --repo Irgendeinwer/MissNix
+# Run portable AppImage directly:
+chmod +x missnix-v*-linux-x86_64.AppImage
+./missnix-v*-linux-x86_64.AppImage
+
+# Optional: verify checksums & SLSA build provenance
 sha256sum -c SHA256SUMS
+gh attestation verify missnix-v*-linux-x86_64.AppImage --repo Irgendeinwer/MissNix
 ```
 
 ### Cargo (From Source)
 
-Requires Rust 1.85+ and standard Wayland/X11/OpenGL development headers (or `nix develop`):
+Requires Rust stable (Edition 2024) and standard Wayland/X11/OpenGL development headers (or `nix develop`):
 
 ```bash
 cargo run --release

@@ -46,7 +46,7 @@ jobs:
       prerelease: ${{ steps.meta.outputs.prerelease }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -78,8 +78,22 @@ jobs:
           fi
 
           VERSION="${TAG#v}"
-          ROOT_VER=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml","rb"))["package"]["version"])')
-          CORE_VER=$(python3 -c 'import tomllib; print(tomllib.load(open("crates/missnix-core/Cargo.toml","rb"))["package"]["version"])')
+          ROOT_VER=$(python3 -c '
+          import tomllib
+          root = tomllib.load(open("Cargo.toml", "rb"))
+          ws_ver = root.get("workspace", {}).get("package", {}).get("version")
+          pkg_ver = root.get("package", {}).get("version")
+          print(ws_ver if isinstance(ws_ver, str) else pkg_ver)
+          ')
+          CORE_VER=$(python3 -c '
+          import tomllib
+          root = tomllib.load(open("Cargo.toml", "rb"))
+          core = tomllib.load(open("crates/missnix-core/Cargo.toml", "rb"))
+          cv = core.get("package", {}).get("version")
+          if isinstance(cv, dict) and cv.get("workspace"):
+              cv = root["workspace"]["package"]["version"]
+          print(cv)
+          ')
 
           if [ "$ROOT_VER" != "$VERSION" ] || [ "$CORE_VER" != "$VERSION" ]; then
             echo "::error::Tag $TAG ($VERSION) does not match Cargo.toml ($ROOT_VER) / missnix-core ($CORE_VER)"
@@ -117,7 +131,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout exact commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
 
@@ -127,6 +141,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             pkg-config \
             cmake \
+            file \
+            desktop-file-utils \
             libfontconfig1-dev \
             libfreetype-dev \
             libwayland-dev \
@@ -158,43 +174,85 @@ jobs:
           BIN="target/x86_64-unknown-linux-gnu/release/missnix"
           "$BIN" --version | grep -qx "missnix ${{ needs.prepare.outputs.version }}"
 
-      - name: Package release archive & SHA256SUMS
+      - name: Package linux-x86_64 archive, portable AppImage & SHA256SUMS
         id: pkg
         run: |
           set -euo pipefail
           TAG="${{ needs.prepare.outputs.tag }}"
-          STAGE="missnix-${TAG}-x86_64-unknown-linux-gnu"
+          STAGE="missnix-${TAG}-linux-x86_64"
           ARCHIVE="${STAGE}.tar.gz"
+          APPIMAGE="${STAGE}.AppImage"
+          BIN="target/x86_64-unknown-linux-gnu/release/missnix"
 
           mkdir -p "dist/${STAGE}/bin" \
                    "dist/${STAGE}/share/icons/hicolor/scalable/apps" \
                    "dist/${STAGE}/share/applications"
 
-          install -m755 "target/x86_64-unknown-linux-gnu/release/missnix" "dist/${STAGE}/bin/missnix"
-          install -m644 assets/missnix.svg "dist/${STAGE}/share/icons/hicolor/scalable/apps/missnix.svg"
-          install -m644 README.md LICENSE "dist/${STAGE}/"
-
-          cat > "dist/${STAGE}/share/applications/missnix.desktop" << 'EOF'
+          cat > dist/missnix.desktop << 'EOF'
           [Desktop Entry]
           Type=Application
           Name=MissNix
-          GenericName=Music Release Tracker
-          Comment=Track new releases from artists in your local music library
+          GenericName=Music Release Radar
+          Comment=Scan your local music folders, track favorite artists, and miss nothing
           Exec=missnix
           Icon=missnix
           Terminal=false
           Categories=AudioVideo;Audio;Music;
           Keywords=music;releases;albums;deezer;musicbrainz;
           EOF
+          desktop-file-validate dist/missnix.desktop
 
+          # 1. Portable .tar.gz archive
+          install -m755 "${BIN}" "dist/${STAGE}/bin/missnix"
+          install -m644 assets/missnix.svg "dist/${STAGE}/share/icons/hicolor/scalable/apps/missnix.svg"
+          install -m644 dist/missnix.desktop "dist/${STAGE}/share/applications/missnix.desktop"
+          install -m644 README.md LICENSE "dist/${STAGE}/"
           tar -C dist -czf "dist/${ARCHIVE}" "${STAGE}"
-          (cd dist && sha256sum "${ARCHIVE}" > SHA256SUMS)
+
+          # 2. Portable AppImage
+          APPDIR="dist/MissNix.AppDir"
+          mkdir -p "${APPDIR}/usr/bin" \
+                   "${APPDIR}/usr/share/applications" \
+                   "${APPDIR}/usr/share/icons/hicolor/scalable/apps"
+
+          install -m755 "${BIN}" "${APPDIR}/usr/bin/missnix"
+          install -m644 dist/missnix.desktop "${APPDIR}/missnix.desktop"
+          install -m644 dist/missnix.desktop "${APPDIR}/usr/share/applications/missnix.desktop"
+          install -m644 assets/missnix.svg "${APPDIR}/missnix.svg"
+          install -m644 assets/missnix.svg "${APPDIR}/usr/share/icons/hicolor/scalable/apps/missnix.svg"
+          ln -sf missnix.svg "${APPDIR}/.DirIcon"
+
+          cat > "${APPDIR}/AppRun" << 'EOF'
+          #!/bin/sh
+          set -e
+          HERE="$(dirname "$(readlink -f "$0")")"
+          export PATH="${HERE}/usr/bin:${PATH}"
+          export XDG_DATA_DIRS="${HERE}/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+          exec "${HERE}/usr/bin/missnix" "$@"
+          EOF
+          chmod 755 "${APPDIR}/AppRun"
+
+          curl -fsSL --retry 3 \
+            -o dist/appimagetool-x86_64.AppImage \
+            https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+          chmod +x dist/appimagetool-x86_64.AppImage
+
+          APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 \
+            ./dist/appimagetool-x86_64.AppImage "${APPDIR}" "dist/${APPIMAGE}"
+          chmod +x "dist/${APPIMAGE}"
+
+          # Smoke-test portable AppImage execution
+          APPIMAGE_EXTRACT_AND_RUN=1 "./dist/${APPIMAGE}" --version | grep -qx "missnix ${{ needs.prepare.outputs.version }}"
+
+          (cd dist && sha256sum "${APPIMAGE}" "${ARCHIVE}" > SHA256SUMS)
           echo "archive=${ARCHIVE}" >> "$GITHUB_OUTPUT"
+          echo "appimage=${APPIMAGE}" >> "$GITHUB_OUTPUT"
 
       - name: Attest build provenance (SLSA)
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
+            dist/${{ steps.pkg.outputs.appimage }}
             dist/${{ steps.pkg.outputs.archive }}
             dist/SHA256SUMS
 
@@ -204,6 +262,7 @@ jobs:
           TAG: ${{ needs.prepare.outputs.tag }}
           PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
           ARCHIVE: ${{ steps.pkg.outputs.archive }}
+          APPIMAGE: ${{ steps.pkg.outputs.appimage }}
         run: |
           set -euo pipefail
 
@@ -216,6 +275,7 @@ jobs:
 
           if [ "$PRERELEASE" = "true" ]; then
             gh release create "$TAG" \
+              "dist/${APPIMAGE}" \
               "dist/${ARCHIVE}" \
               "dist/SHA256SUMS" \
               --verify-tag \
@@ -224,6 +284,7 @@ jobs:
               --prerelease
           else
             gh release create "$TAG" \
+              "dist/${APPIMAGE}" \
               "dist/${ARCHIVE}" \
               "dist/SHA256SUMS" \
               --verify-tag \

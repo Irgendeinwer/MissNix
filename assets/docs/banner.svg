@@ -41,8 +41,8 @@
 
   <!-- Title & Tagline -->
   <g font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
-    <text x="182" y="84" font-size="40" font-weight="800" fill="#f3effa" letter-spacing="-0.8">MissNix</text>
-    <text x="184" y="114" font-size="16" font-weight="500" fill="#b9b2cc">Desktop release radar for local music collections</text>
+    <text x="182" y="82" font-size="40" font-weight="800" fill="#f3effa" letter-spacing="-0.8">MissNix</text>
+    <text x="184" y="112" font-size="14.5" font-weight="500" fill="#b9b2cc">A desktop release radar for your local music library — scan folders, track artists, miss nothing</text>
 
     <!-- Tech pills -->
     <g transform="translate(184, 132)" font-size="12" font-weight="600">

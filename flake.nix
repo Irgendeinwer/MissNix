@@ -1,5 +1,5 @@
 {
-  description = "MissNix — Desktop local music release tracker (Rust + Slint + SQLite + Deezer/MusicBrainz)";
+  description = "A desktop release radar for your local music library — scan your folders, track favorite artists, and miss nothing";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -9,6 +9,7 @@
     { self, nixpkgs }:
     let
       cargoMeta = builtins.fromTOML (builtins.readFile ./Cargo.toml);
+      pkgVersion = cargoMeta.workspace.package.version or cargoMeta.package.version;
 
       supportedSystems = [
         "x86_64-linux"
@@ -49,8 +50,8 @@
           desktopItem = pkgs.makeDesktopItem {
             name = "missnix";
             desktopName = "MissNix";
-            genericName = "Music Release Tracker";
-            comment = "Track new releases from artists in your local music library";
+            genericName = "Music Release Radar";
+            comment = "Scan your local music folders, track favorite artists, and miss nothing";
             exec = "missnix";
             icon = "missnix";
             terminal = false;
@@ -70,7 +71,7 @@
         in
         pkgs.rustPlatform.buildRustPackage {
           pname = "missnix";
-          version = cargoMeta.package.version;
+          version = pkgVersion;
 
           src = lib.cleanSource self;
 
@@ -122,7 +123,7 @@
           '';
 
           meta = {
-            description = "Standalone desktop release radar for artists in your local music collection";
+            description = "Desktop release radar for your local music library — scan your folders, track favorite artists, and miss nothing";
             homepage = "https://github.com/Irgendeinwer/MissNix";
             license = lib.licenses.mit;
             mainProgram = "missnix";
@@ -152,7 +153,7 @@
           type = "app";
           program = "${self.packages.${system}.default}/bin/missnix";
           meta = {
-            description = "MissNix local music release tracker";
+            description = "Desktop release radar for your local music library";
           };
         };
       });

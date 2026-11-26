@@ -1337,10 +1337,8 @@ fn spawn_image_worker(
                         let slint_img = Image::from_rgba8(buf);
 
                         UI_STATE_SLOT.with(|slot| {
-                            let Some(ref weak_st) = *slot.borrow() else {
-                                return;
-                            };
-                            let Some(rc_st) = weak_st.upgrade() else {
+                            let Some(rc_st) = slot.borrow().as_ref().and_then(std::rc::Weak::upgrade)
+                            else {
                                 return;
                             };
                             let mut guard = rc_st.borrow_mut();
@@ -1391,10 +1389,8 @@ fn spawn_image_worker(
                         let slint_img = Image::from_rgba8(buf);
 
                         UI_STATE_SLOT.with(|slot| {
-                            let Some(ref weak_st) = *slot.borrow() else {
-                                return;
-                            };
-                            let Some(rc_st) = weak_st.upgrade() else {
+                            let Some(rc_st) = slot.borrow().as_ref().and_then(std::rc::Weak::upgrade)
+                            else {
                                 return;
                             };
                             let mut guard = rc_st.borrow_mut();

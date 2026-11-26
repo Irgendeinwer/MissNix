@@ -1,18 +1,18 @@
 [package]
 name = "missnix-core"
-version = "0.1.0"
-edition = "2021"
-license = "MIT"
-description = "Core library scanner, SQLite state persistence, smart deduplication, and Deezer/MusicBrainz release radar engine for MissNix"
-repository = "https://github.com/Irgendeinwer/MissNix"
-homepage = "https://github.com/Irgendeinwer/MissNix"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Core library scanner, SQLite persistence, deduplication, and Deezer/MusicBrainz sync engine for MissNix."
+repository.workspace = true
+homepage.workspace = true
 
 [dependencies]
-dirs = "6.0"
-lofty = "0.25"
-rusqlite = { version = "0.43", default-features = false, features = ["bundled"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-thiserror = "2.0"
-ureq = { version = "2.12", default-features = false, features = ["tls", "json", "gzip"] }
-walkdir = "2.5"
+dirs = "7.0.0"
+lofty = "0.25.5"
+rusqlite = { version = "0.43.0", default-features = false, features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+thiserror = "2.0.21"
+ureq = { version = "3.5.2", default-features = false, features = ["rustls", "gzip", "json"] }
+walkdir = "2.5.1"

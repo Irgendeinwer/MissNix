@@ -143,11 +143,13 @@ impl MusicBrainzClient {
     }
 
     pub fn with_base_urls(mb_base: &str, caa_base: &str, min_interval: Duration) -> Self {
-        let agent = ureq::builder()
-            .timeout_connect(Duration::from_secs(8))
-            .timeout_read(Duration::from_secs(18))
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_connect(Some(Duration::from_secs(8)))
+            .timeout_recv_response(Some(Duration::from_secs(18)))
+            .timeout_recv_body(Some(Duration::from_secs(20)))
             .user_agent(USER_AGENT)
-            .build();
+            .build()
+            .into();
         Self {
             agent,
             mb_base_url: mb_base.trim_end_matches('/').to_string(),
@@ -385,17 +387,21 @@ impl MusicBrainzClient {
         let mut backoff = Duration::from_millis(1200);
         for attempt in 0..3 {
             self.enforce_polite_rate_limit();
-            let result = self.agent.get(url).set("Accept", "application/json").call();
+            let result = self
+                .agent
+                .get(url)
+                .header("Accept", "application/json")
+                .call();
             match result {
-                Ok(resp) => {
-                    return resp.into_json().map_err(|e| CoreError::InvalidResponse {
-                        provider: "musicbrainz",
-                        message: e.to_string(),
+                Ok(mut resp) => {
+                    return resp.body_mut().read_json().map_err(|e| {
+                        CoreError::InvalidResponse {
+                            provider: "musicbrainz",
+                            message: e.to_string(),
+                        }
                     });
                 }
-                Err(ureq::Error::Status(503, _)) | Err(ureq::Error::Status(429, _))
-                    if attempt < 2 =>
-                {
+                Err(ureq::Error::StatusCode(503 | 429)) if attempt < 2 => {
                     thread::sleep(backoff);
                     backoff *= 2;
                 }

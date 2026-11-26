@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::io::Read;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -121,11 +120,13 @@ impl DeezerClient {
     }
 
     pub fn with_base_url(base_url: &str, min_interval: Duration) -> Self {
-        let agent = ureq::builder()
-            .timeout_connect(Duration::from_secs(8))
-            .timeout_read(Duration::from_secs(15))
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_connect(Some(Duration::from_secs(8)))
+            .timeout_recv_response(Some(Duration::from_secs(15)))
+            .timeout_recv_body(Some(Duration::from_secs(20)))
             .user_agent(USER_AGENT)
-            .build();
+            .build()
+            .into();
         Self {
             agent,
             base_url: base_url.trim_end_matches('/').to_string(),
@@ -386,16 +387,17 @@ impl DeezerClient {
         Ok(out)
     }
 
-    /// Download cover image bytes (up to 8 MiB) from a URL.
+    /// Download cover image or preview bytes (up to 8 MiB) from a URL.
     pub fn download_bytes(&self, url: &str) -> CoreResult<Vec<u8>> {
-        let resp = self.agent.get(url).call().map_err(|e| CoreError::Network {
+        let mut resp = self.agent.get(url).call().map_err(|e| CoreError::Network {
             provider: "deezer",
             message: e.to_string(),
         })?;
-        let mut buf = Vec::with_capacity(64 * 1024);
-        resp.into_reader()
-            .take(8 * 1024 * 1024)
-            .read_to_end(&mut buf)
+        let buf = resp
+            .body_mut()
+            .with_config()
+            .limit(8 * 1024 * 1024)
+            .read_to_vec()
             .map_err(|e| CoreError::InvalidResponse {
                 provider: "deezer",
                 message: e.to_string(),
@@ -441,14 +443,20 @@ impl DeezerClient {
         let mut backoff = Duration::from_millis(450);
         for attempt in 0..3 {
             let started = Instant::now();
-            let result = self.agent.get(url).set("Accept", "application/json").call();
+            let result = self
+                .agent
+                .get(url)
+                .header("Accept", "application/json")
+                .call();
             match result {
-                Ok(resp) => {
+                Ok(mut resp) => {
                     let body: serde_json::Value =
-                        resp.into_json().map_err(|e| CoreError::InvalidResponse {
-                            provider: "deezer",
-                            message: e.to_string(),
-                        })?;
+                        resp.body_mut()
+                            .read_json()
+                            .map_err(|e| CoreError::InvalidResponse {
+                                provider: "deezer",
+                                message: e.to_string(),
+                            })?;
 
                     // Deezer returns HTTP 200 with `{"error": {"code": 4, ...}}` when quota-limited
                     if body
@@ -470,9 +478,7 @@ impl DeezerClient {
                     }
                     return Ok(parsed);
                 }
-                Err(ureq::Error::Status(429, _)) | Err(ureq::Error::Status(503, _))
-                    if attempt < 2 =>
-                {
+                Err(ureq::Error::StatusCode(429 | 503)) if attempt < 2 => {
                     thread::sleep(backoff);
                     backoff *= 2;
                 }

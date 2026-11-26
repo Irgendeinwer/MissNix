@@ -6,7 +6,9 @@ This document defines the architecture, invariants, UI constraints, and verifica
 
 ## 1. Project Overview
 
-**MissNix** is a standalone Linux/macOS/Windows desktop **Local Music Release Radar**:
+> *"A desktop release radar for your local music library — scan your folders, track favorite artists, and miss nothing."*
+
+**MissNix** is a standalone desktop application (Rust Edition 2024 + Slint 1.19 + SQLite):
 1. Scans local audio directories (`lofty` tags + `<Artist>/<Year - Album>` folder structure) to build a clean primary-artist roster.
 2. Persists folders, artists, indexed local albums, remote releases, cached tracklists, and user preferences in SQLite (`rusqlite`, WAL mode).
 3. Queries **Deezer** (fast artist/discography lookup, artwork, tracklists, 30s MP3 previews) and **MusicBrainz** (canonical MBIDs, 1.1s rate-limited release groups, Cover Art Archive), deduplicating editions and flagging locally owned albums.
@@ -98,5 +100,5 @@ cargo run -- --db /tmp/missnix-smoke.db --scan ~/Music --status
 
 ## 5. Release Process (Immutable Releases)
 
-1. Bump `version` identically in `Cargo.toml` and `crates/missnix-core/Cargo.toml` (`flake.nix` reads `Cargo.toml` automatically) and update `Cargo.lock`.
-2. Commit to `main` with `release: vX.Y.Z` (or `chore(release): vX.Y.Z`) and push — `.github/workflows/release.yml` verifies tests, builds the release archive + `SHA256SUMS`, signs SLSA build provenance, creates tag `vX.Y.Z`, and publishes the immutable GitHub Release.
+1. Bump `version` under `[workspace.package]` in root `Cargo.toml` (`crates/missnix-core/Cargo.toml` and `flake.nix` inherit it automatically) and run `cargo check` so `Cargo.lock` updates.
+2. Commit to `main` with `release: vX.Y.Z` (or `chore(release): vX.Y.Z`) and push — `.github/workflows/release.yml` verifies tests, builds `missnix-vX.Y.Z-linux-x86_64.AppImage` + `missnix-vX.Y.Z-linux-x86_64.tar.gz` + `SHA256SUMS`, signs SLSA build provenance, creates tag `vX.Y.Z`, and publishes the immutable GitHub Release.

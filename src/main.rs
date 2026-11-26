@@ -195,7 +195,7 @@ fn run_headless_cli(
 
 fn print_help() {
     println!(
-        "MissNix — Local Music Release Tracker\n\n\
+        "MissNix {} — A desktop release radar for your local music library\n\n\
          USAGE:\n  \
            missnix [OPTIONS]\n\n\
          OPTIONS:\n  \
@@ -205,6 +205,7 @@ fn print_help() {
            --check           Check Deezer + MusicBrainz for new releases headlessly\n  \
            --status          Print tracked artist & unread release counts\n  \
            -h, --help        Print help information\n  \
-           -V, --version     Print version"
+           -V, --version     Print version",
+        env!("CARGO_PKG_VERSION")
     );
 }

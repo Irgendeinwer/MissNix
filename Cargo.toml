@@ -1,30 +1,37 @@
 [workspace]
 members = ["crates/missnix-core", "."]
-resolver = "2"
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/Irgendeinwer/MissNix"
+homepage = "https://github.com/Irgendeinwer/MissNix"
 
 [package]
 name = "missnix"
-version = "0.1.0"
-edition = "2021"
-license = "MIT"
-description = "Desktop local music release radar built with Rust, Slint, SQLite, and Deezer + MusicBrainz"
-repository = "https://github.com/Irgendeinwer/MissNix"
-homepage = "https://github.com/Irgendeinwer/MissNix"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "A desktop release radar for your local music library — scan your folders, track favorite artists, and miss nothing."
+repository.workspace = true
+homepage.workspace = true
 readme = "README.md"
 keywords = ["music", "releases", "slint", "musicbrainz", "deezer"]
 categories = ["multimedia::audio", "gui"]
 default-run = "missnix"
 
 [dependencies]
-image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
-libc = "0.2"
-libloading = "0.8"
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
+libc = "0.2.191"
+libloading = "0.9.1"
 missnix-core = { path = "crates/missnix-core" }
-nanomp3 = "0.1.1"
-open = "5.3"
-slint = { version = "1.19", default-features = false, features = [
+nanomp3 = "0.2.0"
+open = "5.4.5"
+slint = { version = "1.19.1", default-features = false, features = [
     "std",
-    "compat-1-2",
+    "compat-1-18",
     "backend-winit",
     "renderer-femtovg",
     "renderer-software",
@@ -33,7 +40,7 @@ slint = { version = "1.19", default-features = false, features = [
 ] }
 
 [build-dependencies]
-slint-build = "1.19"
+slint-build = "1.19.1"
 
 [profile.release]
 opt-level = 2

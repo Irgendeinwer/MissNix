@@ -1,4 +1,4 @@
-use std::ffi::{c_char, c_int, c_long, c_uint, c_ulong, c_void, CString};
+use std::ffi::{c_char, c_int, c_long, c_uint, c_ulong, c_void};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
@@ -474,66 +474,17 @@ fn decode_mp3_bytes(mp3: &[u8]) -> Result<DecodedPcm, String> {
         return Err("Preview audio buffer is empty or truncated".to_string());
     }
 
-    let mut decoder = nanomp3::Decoder::new();
-    let mut pcm_frame = [0.0f32; nanomp3::MAX_SAMPLES_PER_FRAME];
-    let mut all_samples = Vec::with_capacity(44_100 * 2 * 31);
-    let mut sample_rate = 0u32;
-    let mut channels = 0u8;
-    let mut offset = skip_id3v2_tag(mp3);
-
-    while offset < mp3.len() {
-        let (consumed, info_opt) = decoder.decode(&mp3[offset..], &mut pcm_frame);
-        if let Some(info) = info_opt {
-            let frame_ch = info.channels.num();
-            if sample_rate == 0 {
-                sample_rate = info.sample_rate;
-                channels = frame_ch;
-            }
-            let count = info.samples_produced * usize::from(frame_ch);
-            if frame_ch == channels {
-                all_samples.extend_from_slice(&pcm_frame[..count]);
-            } else if channels == 2 && frame_ch == 1 {
-                for &s in &pcm_frame[..info.samples_produced] {
-                    all_samples.push(s);
-                    all_samples.push(s);
-                }
-            }
-        }
-
-        if consumed == 0 {
-            if info_opt.is_none() {
-                offset += 1;
-            } else {
-                break;
-            }
-        } else {
-            offset += consumed;
-        }
-    }
-
-    if all_samples.is_empty() || sample_rate == 0 {
+    let decoded = nanomp3::decode_all::<f32>(mp3);
+    if decoded.samples.is_empty() || decoded.sample_rate == 0 {
         return Err("Unable to decode MP3 preview stream".to_string());
     }
 
+    let channels = decoded.channels.map_or(2, |c| c.num()).max(1);
     Ok(DecodedPcm {
-        sample_rate,
-        channels: channels.max(1),
-        samples: all_samples,
+        sample_rate: decoded.sample_rate,
+        channels,
+        samples: decoded.samples,
     })
-}
-
-fn skip_id3v2_tag(bytes: &[u8]) -> usize {
-    if bytes.len() >= 10 && &bytes[0..3] == b"ID3" {
-        let sz = ((usize::from(bytes[6] & 0x7F)) << 21)
-            | ((usize::from(bytes[7] & 0x7F)) << 14)
-            | ((usize::from(bytes[8] & 0x7F)) << 7)
-            | usize::from(bytes[9] & 0x7F);
-        let end = 10 + sz;
-        if end < bytes.len() {
-            return end;
-        }
-    }
-    0
 }
 
 fn format_mm_ss(secs: f32) -> String {
@@ -623,18 +574,16 @@ impl PulseSimpleSink {
                 .or_else(|_| libloading::Library::new("libpulse-simple.so"))
                 .map_err(|e| e.to_string())?;
 
-            let fn_new: PaSimpleNewFn = *lib.get(b"pa_simple_new\0").map_err(|e| e.to_string())?;
+            let fn_new: PaSimpleNewFn = *lib.get(c"pa_simple_new").map_err(|e| e.to_string())?;
             let fn_write: PaSimpleWriteFn =
-                *lib.get(b"pa_simple_write\0").map_err(|e| e.to_string())?;
+                *lib.get(c"pa_simple_write").map_err(|e| e.to_string())?;
             let fn_flush: PaSimpleFlushFn =
-                *lib.get(b"pa_simple_flush\0").map_err(|e| e.to_string())?;
+                *lib.get(c"pa_simple_flush").map_err(|e| e.to_string())?;
             let fn_drain: PaSimpleDrainFn =
-                *lib.get(b"pa_simple_drain\0").map_err(|e| e.to_string())?;
+                *lib.get(c"pa_simple_drain").map_err(|e| e.to_string())?;
             let fn_free: PaSimpleFreeFn =
-                *lib.get(b"pa_simple_free\0").map_err(|e| e.to_string())?;
+                *lib.get(c"pa_simple_free").map_err(|e| e.to_string())?;
 
-            let app_name = CString::new("MissNix").unwrap();
-            let stream_name = CString::new("30s Preview").unwrap();
             let spec = PaSampleSpec {
                 format: PA_SAMPLE_S16LE,
                 rate: sample_rate,
@@ -653,10 +602,10 @@ impl PulseSimpleSink {
             let mut err: c_int = 0;
             let handle = fn_new(
                 std::ptr::null(),
-                app_name.as_ptr(),
+                c"MissNix".as_ptr(),
                 PA_STREAM_PLAYBACK,
                 std::ptr::null(),
-                stream_name.as_ptr(),
+                c"30s Preview".as_ptr(),
                 &spec,
                 std::ptr::null(),
                 &attr,
@@ -772,25 +721,24 @@ impl AlsaPcmSink {
                 .or_else(|_| libloading::Library::new("libasound.so"))
                 .map_err(|e| e.to_string())?;
 
-            let fn_open: SndPcmOpenFn = *lib.get(b"snd_pcm_open\0").map_err(|e| e.to_string())?;
+            let fn_open: SndPcmOpenFn = *lib.get(c"snd_pcm_open").map_err(|e| e.to_string())?;
             let fn_set_params: SndPcmSetParamsFn = *lib
-                .get(b"snd_pcm_set_params\0")
+                .get(c"snd_pcm_set_params")
                 .map_err(|e| e.to_string())?;
             let fn_writei: SndPcmWriteiFn =
-                *lib.get(b"snd_pcm_writei\0").map_err(|e| e.to_string())?;
+                *lib.get(c"snd_pcm_writei").map_err(|e| e.to_string())?;
             let fn_recover: SndPcmRecoverFn =
-                *lib.get(b"snd_pcm_recover\0").map_err(|e| e.to_string())?;
+                *lib.get(c"snd_pcm_recover").map_err(|e| e.to_string())?;
             let fn_prepare: SndPcmPrepareFn =
-                *lib.get(b"snd_pcm_prepare\0").map_err(|e| e.to_string())?;
-            let fn_drop: SndPcmDropFn = *lib.get(b"snd_pcm_drop\0").map_err(|e| e.to_string())?;
+                *lib.get(c"snd_pcm_prepare").map_err(|e| e.to_string())?;
+            let fn_drop: SndPcmDropFn = *lib.get(c"snd_pcm_drop").map_err(|e| e.to_string())?;
             let fn_drain: SndPcmDrainFn =
-                *lib.get(b"snd_pcm_drain\0").map_err(|e| e.to_string())?;
+                *lib.get(c"snd_pcm_drain").map_err(|e| e.to_string())?;
             let fn_close: SndPcmCloseFn =
-                *lib.get(b"snd_pcm_close\0").map_err(|e| e.to_string())?;
+                *lib.get(c"snd_pcm_close").map_err(|e| e.to_string())?;
 
-            let dev = CString::new("default").unwrap();
             let mut pcm: *mut c_void = std::ptr::null_mut();
-            let rc = fn_open(&mut pcm, dev.as_ptr(), SND_PCM_STREAM_PLAYBACK, 0);
+            let rc = fn_open(&mut pcm, c"default".as_ptr(), SND_PCM_STREAM_PLAYBACK, 0);
             if rc < 0 || pcm.is_null() {
                 return Err(format!("snd_pcm_open failed ({rc})"));
             }
