@@ -161,6 +161,9 @@ jobs:
 
       - name: Restore Cargo cache
         uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: cargo-release-linux-x86_64
+          cache-on-failure: true
 
       - name: Verify formatting, lints & unit tests
         run: |
