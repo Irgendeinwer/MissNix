@@ -1,5 +1,6 @@
 mod sinks;
 
+use std::path::Path;
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread;
