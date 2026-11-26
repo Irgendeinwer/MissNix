@@ -140,22 +140,6 @@ ExecStart=%h/.nix-profile/bin/missnix --check --status
 
 ---
 
-## Creating a Release
-
-Releases are built, attested (SLSA provenance + `SHA256SUMS`), and published automatically by [`.github/workflows/release.yml`](.github/workflows/release.yml). Published tags are **immutable** (existing releases are never overwritten; enable *Settings → General → Releases → Enable release immutability* in GitHub for server-side enforcement).
-
-To cut a new release (e.g. `v0.2.0`):
-
-1. Update `version = "0.2.0"` in both `Cargo.toml` and `crates/missnix-core/Cargo.toml` (`flake.nix` reads `Cargo.toml` automatically) and run `cargo check` so `Cargo.lock` updates.
-2. Commit with a `release: vX.Y.Z` subject on `main` and push:
-   ```bash
-   git commit -am "release: v0.2.0"
-   git push origin main
-   ```
-   *(Alternatively, push a `v0.2.0` git tag directly or trigger the **Release** workflow manually via `workflow_dispatch` in GitHub Actions.)*
-
----
-
 ## License
 
 Released under the [MIT License](LICENSE).

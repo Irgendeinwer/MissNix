@@ -428,12 +428,17 @@ impl Database {
         if !trimmed.is_empty() {
             let norm = normalize_artist_name(trimmed);
             let like_raw = format!("%{}%", escape_sql_like(&trimmed.to_lowercase()));
-            let like_norm = format!("%{}%", escape_sql_like(&norm));
-            sql.push_str(
-                " AND (LOWER(a.name) LIKE ? ESCAPE '\\' OR a.normalized_name LIKE ? ESCAPE '\\')",
-            );
-            bind_vals.push(Box::new(like_raw));
-            bind_vals.push(Box::new(like_norm));
+            if norm.is_empty() {
+                sql.push_str(" AND LOWER(a.name) LIKE ? ESCAPE '\\'");
+                bind_vals.push(Box::new(like_raw));
+            } else {
+                let like_norm = format!("%{}%", escape_sql_like(&norm));
+                sql.push_str(
+                    " AND (LOWER(a.name) LIKE ? ESCAPE '\\' OR a.normalized_name LIKE ? ESCAPE '\\')",
+                );
+                bind_vals.push(Box::new(like_raw));
+                bind_vals.push(Box::new(like_norm));
+            }
         }
 
         if let Some(st) = status_filter {
@@ -846,13 +851,22 @@ impl Database {
         let trimmed = query.search.trim();
         if !trimmed.is_empty() {
             let like_raw = format!("%{}%", escape_sql_like(&trimmed.to_lowercase()));
-            let norm_t = format!("%{}%", escape_sql_like(&normalize_release_title(trimmed)));
-            sql.push_str(
-                " AND (LOWER(r.title) LIKE ? ESCAPE '\\' OR LOWER(a.name) LIKE ? ESCAPE '\\' OR r.normalized_title LIKE ? ESCAPE '\\')",
-            );
-            bind_vals.push(Box::new(like_raw.clone()));
-            bind_vals.push(Box::new(like_raw));
-            bind_vals.push(Box::new(norm_t));
+            let norm = normalize_release_title(trimmed);
+            if norm.is_empty() {
+                sql.push_str(
+                    " AND (LOWER(r.title) LIKE ? ESCAPE '\\' OR LOWER(a.name) LIKE ? ESCAPE '\\')",
+                );
+                bind_vals.push(Box::new(like_raw.clone()));
+                bind_vals.push(Box::new(like_raw));
+            } else {
+                let norm_t = format!("%{}%", escape_sql_like(&norm));
+                sql.push_str(
+                    " AND (LOWER(r.title) LIKE ? ESCAPE '\\' OR LOWER(a.name) LIKE ? ESCAPE '\\' OR r.normalized_title LIKE ? ESCAPE '\\')",
+                );
+                bind_vals.push(Box::new(like_raw.clone()));
+                bind_vals.push(Box::new(like_raw));
+                bind_vals.push(Box::new(norm_t));
+            }
         }
 
         match query.sort.unwrap_or(FeedSort::NewestFirst) {
