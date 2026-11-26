@@ -1023,7 +1023,12 @@ impl Database {
                 "dark_mode" => s.dark_mode = v == "true",
                 "accent_preset" => {
                     if let Ok(n) = v.parse::<u8>() {
-                        s.accent_preset = n.min(5);
+                        s.accent_preset = n.min(crate::palette::MAX_ACCENT_PRESET);
+                    }
+                }
+                "custom_accent_hex" => {
+                    if let Some(norm) = crate::palette::normalize_hex_color(&v) {
+                        s.custom_accent_hex = norm;
                     }
                 }
                 "grid_density" => {
@@ -1070,9 +1075,17 @@ impl Database {
 
     pub fn save_settings(&mut self, s: &AppSettings) -> CoreResult<()> {
         let tx = self.conn.transaction()?;
-        let pairs: [(&str, String); 16] = [
+        let normalized_hex = crate::palette::normalize_hex_color(&s.custom_accent_hex)
+            .unwrap_or_else(|| crate::palette::DEFAULT_CUSTOM_ACCENT_HEX.to_string());
+        let pairs: [(&str, String); 17] = [
             ("dark_mode", s.dark_mode.to_string()),
-            ("accent_preset", s.accent_preset.to_string()),
+            (
+                "accent_preset",
+                s.accent_preset
+                    .min(crate::palette::MAX_ACCENT_PRESET)
+                    .to_string(),
+            ),
+            ("custom_accent_hex", normalized_hex),
             ("grid_density", s.grid_density.to_string()),
             (
                 "ui_scale_percent",
@@ -2360,7 +2373,8 @@ mod tests {
         // Persist and reload customization & scan settings (including HiDPI UI scale)
         let custom = AppSettings {
             dark_mode: false,
-            accent_preset: 3,
+            accent_preset: 7,
+            custom_accent_hex: "#ea6c34".to_string(),
             grid_density: 2,
             ui_scale_percent: 150,
             preview_volume: 65,
@@ -2371,7 +2385,8 @@ mod tests {
         db.save_settings(&custom).unwrap();
         let loaded = db.load_settings().unwrap();
         assert!(!loaded.dark_mode);
-        assert_eq!(loaded.accent_preset, 3);
+        assert_eq!(loaded.accent_preset, 7);
+        assert_eq!(loaded.custom_accent_hex, "#EA6C34");
         assert_eq!(loaded.grid_density, 2);
         assert_eq!(loaded.ui_scale_percent, 150);
         assert_eq!(loaded.preview_volume, 65);

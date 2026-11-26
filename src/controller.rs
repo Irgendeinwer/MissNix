@@ -10,21 +10,22 @@ use std::time::{Duration, Instant};
 use missnix_core::normalize::{days_ago_iso_utc, today_iso_utc};
 use missnix_core::{
     AppPaths, AppSettings, Artist, ArtistDiscoveryMode, ArtistSearchCandidate, ArtistSource,
-    ArtistStatus, CoreError, Database, FeedQuery, FeedSort, ProgressEvent, ProviderMode, Release,
-    ReleaseState, ReleaseTrack, ReleaseType, ScanOptions, ScanOutcome, SyncEngine,
-    is_deezer_preview_url_expired, scan_library_folders_with_options,
+    ArtistStatus, CUSTOM_ACCENT_PRESET, CoreError, DEFAULT_CUSTOM_ACCENT_HEX, Database, FeedQuery,
+    FeedSort, MAX_ACCENT_PRESET, ProgressEvent, ProviderMode, Release, ReleaseState, ReleaseTrack,
+    ReleaseType, ScanOptions, ScanOutcome, SyncEngine, is_deezer_preview_url_expired,
+    normalize_hex_color, resolve_theme_palette, scan_library_folders_with_options,
 };
 use slint::platform::WindowEvent;
 use slint::{
-    ComponentHandle, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, Timer,
-    TimerMode, VecModel, Weak,
+    Color, ComponentHandle, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString,
+    Timer, TimerMode, VecModel, Weak,
 };
 
 use crate::audio_player::{AudioPreviewHandle, PreviewRequest, PreviewUiUpdate};
 use crate::folder_picker::pick_music_folder;
 use crate::{
     AppWindow, ArtistRowData, FolderRowData, LocalAlbumRowData, ReleaseCardData,
-    SearchCandidateRowData, TrackRowData,
+    SearchCandidateRowData, Theme, TrackRowData,
 };
 
 pub enum ImageJob {
@@ -840,8 +841,13 @@ pub fn wire_controller(
             let Some(win) = weak.upgrade() else { return };
             let mut guard = st.borrow_mut();
             let prev_vol = guard.settings.preview_volume;
+            let prev_hex = guard.settings.custom_accent_hex.clone();
             let mut updated = read_settings_from_window(&win);
             updated.preview_volume = prev_vol;
+            if normalize_hex_color(&updated.custom_accent_hex).is_none() {
+                updated.custom_accent_hex = prev_hex;
+            }
+            apply_theme_to_window(&win, &updated);
             win.set_feed_hide_owned(updated.hide_owned_locally);
             let _ = guard.db.save_settings(&updated);
             guard.settings = updated;
@@ -881,10 +887,37 @@ pub fn wire_controller(
             let Some(win) = weak.upgrade() else { return };
             let mut guard = st.borrow_mut();
             guard.settings.dark_mode = dark;
-            let accent = guard.settings.accent_preset as i32;
             let s = guard.settings.clone();
             let _ = guard.db.save_settings(&s);
-            win.invoke_apply_theme(dark, accent);
+            apply_theme_to_window(&win, &s);
+        });
+    }
+
+    {
+        let weak = app.as_weak();
+        let st = state.clone();
+        app.on_custom_accent_changed(move |raw_hex, finalize| {
+            let Some(win) = weak.upgrade() else { return };
+            if let Some(norm) = normalize_hex_color(&raw_hex) {
+                let mut guard = st.borrow_mut();
+                guard.settings.custom_accent_hex = norm.clone();
+                guard.settings.accent_preset = CUSTOM_ACCENT_PRESET;
+                let s = guard.settings.clone();
+                let _ = guard.db.save_settings(&s);
+                if finalize {
+                    win.set_pref_custom_accent_hex(norm.clone().into());
+                    win.set_status_is_warning(false);
+                    win.set_status_banner_text(
+                        format!("Applied custom Material 3 palette ({norm})").into(),
+                    );
+                }
+                apply_theme_to_window(&win, &s);
+            } else if finalize {
+                win.set_status_is_warning(true);
+                win.set_status_banner_text(
+                    "Enter a valid 3- or 6-digit hex color such as #EA6C34 or #38BDF8.".into(),
+                );
+            }
         });
     }
 
@@ -1442,9 +1475,45 @@ fn decode_thumbnail_rgba(path: &Path, max_dim: u32) -> Option<(u32, u32, Vec<u8>
 // UI Hydration & Formatting Helpers
 // =============================================================================
 
+fn rgb(c: [u8; 3]) -> Color {
+    Color::from_rgb_u8(c[0], c[1], c[2])
+}
+
+fn apply_theme_to_window(win: &AppWindow, s: &AppSettings) {
+    win.invoke_apply_theme(s.dark_mode, i32::from(s.accent_preset));
+    let p = resolve_theme_palette(s.accent_preset, &s.custom_accent_hex, s.dark_mode);
+    let theme = win.global::<Theme>();
+    theme.set_dark_mode(s.dark_mode);
+    theme.set_accent_preset(i32::from(s.accent_preset));
+    theme.set_custom_swatch(rgb(p.custom_swatch));
+
+    theme.set_surface(rgb(p.surface));
+    theme.set_surface_rail(rgb(p.surface_rail));
+    theme.set_surface_container_low(rgb(p.surface_container_low));
+    theme.set_surface_container(rgb(p.surface_container));
+    theme.set_surface_container_high(rgb(p.surface_container_high));
+    theme.set_surface_container_highest(rgb(p.surface_container_highest));
+
+    theme.set_on_surface(rgb(p.on_surface));
+    theme.set_on_surface_variant(rgb(p.on_surface_variant));
+    theme.set_on_surface_muted(rgb(p.on_surface_muted));
+
+    theme.set_outline(rgb(p.outline));
+    theme.set_outline_variant(rgb(p.outline_variant));
+
+    theme.set_primary(rgb(p.primary));
+    theme.set_on_primary(rgb(p.on_primary));
+    theme.set_primary_container(rgb(p.primary_container));
+    theme.set_on_primary_container(rgb(p.on_primary_container));
+
+    theme.set_secondary_container(rgb(p.secondary_container));
+    theme.set_on_secondary_container(rgb(p.on_secondary_container));
+}
+
 fn apply_settings_to_window(win: &AppWindow, s: &AppSettings) {
     win.set_pref_dark_mode(s.dark_mode);
     win.set_pref_accent_preset(i32::from(s.accent_preset));
+    win.set_pref_custom_accent_hex(s.custom_accent_hex.clone().into());
     win.set_pref_grid_density(i32::from(s.grid_density));
     win.set_pref_ui_scale_pct(i32::from(s.ui_scale_percent));
     win.set_preview_volume_pct(i32::from(s.preview_volume));
@@ -1460,13 +1529,18 @@ fn apply_settings_to_window(win: &AppWindow, s: &AppSettings) {
     win.set_pref_lookback_index(s.lookback_index());
     win.set_pref_provider_index(s.provider_mode.index());
     win.set_pref_schedule_index(s.interval_index());
-    win.invoke_apply_theme(s.dark_mode, i32::from(s.accent_preset));
+    apply_theme_to_window(win, s);
 }
 
 fn read_settings_from_window(win: &AppWindow) -> AppSettings {
+    let custom_hex = normalize_hex_color(&win.get_pref_custom_accent_hex())
+        .unwrap_or_else(|| DEFAULT_CUSTOM_ACCENT_HEX.to_string());
     AppSettings {
         dark_mode: win.get_pref_dark_mode(),
-        accent_preset: win.get_pref_accent_preset().clamp(0, 5) as u8,
+        accent_preset: win
+            .get_pref_accent_preset()
+            .clamp(0, i32::from(MAX_ACCENT_PRESET)) as u8,
+        custom_accent_hex: custom_hex,
         grid_density: win.get_pref_grid_density().clamp(0, 2) as u8,
         ui_scale_percent: win.get_pref_ui_scale_pct().clamp(75, 250) as u16,
         preview_volume: win.get_preview_volume_pct().clamp(0, 100) as u8,

@@ -1,11 +1,7 @@
 import {
-    ComboBox,
     ListView,
     Palette,
-    ProgressIndicator,
     ScrollView,
-    Spinner,
-    Switch,
 } from "std-widgets.slint";
 
 import { Theme } from "theme.slint";
@@ -30,7 +26,11 @@ import {
     M3FilterChip,
     M3IconButton,
     M3LabeledInput,
+    M3ProgressBar,
     M3SearchField,
+    M3Select,
+    M3Spinner,
+    M3Switch,
     MissNixLogo,
     NavRailItem,
     PreviewMiniPlayer,
@@ -47,6 +47,7 @@ export {
     LocalAlbumRowData,
     ReleaseCardData,
     SearchCandidateRowData,
+    Theme,
     TrackRowData,
 }
 
@@ -144,7 +145,8 @@ export component AppWindow inherits Window {
     in-out property <string> new-folder-path: "";
 
     in-out property <bool> pref-dark-mode: true;
-    in-out property <int> pref-accent-preset: 0;    // 0..5
+    in-out property <int> pref-accent-preset: 0;    // 0..6 presets, 7 = Custom Hex
+    in-out property <string> pref-custom-accent-hex: "#6366F1";
     in-out property <int> pref-grid-density: 1;     // 0=Compact, 1=Comfortable, 2=Spacious
     in-out property <int> pref-ui-scale-pct: 100;   // 90, 100, 115, 125, 150, 175, 200
     in-out property <int> pref-discovery-mode: 0;   // 0=AlbumArtist+Folder, 1=FolderOnly, 2=AllTags+Folder
@@ -205,6 +207,7 @@ export component AppWindow inherits Window {
     callback preferences-changed();
     callback scan-preferences-changed();
     callback theme-toggled(bool);
+    callback custom-accent-changed(string, bool);
     callback ui-scale-changed(int);
 
     public function apply-theme(dark: bool, accent: int) {
@@ -403,7 +406,7 @@ export component AppWindow inherits Window {
 
                                 HorizontalLayout {
                                     spacing: 8px;
-                                    Spinner {
+                                    M3Spinner {
                                         width: 16px;
                                         height: 16px;
                                         y: (parent.height - self.height) / 2;
@@ -420,7 +423,7 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
-                                ProgressIndicator {
+                                M3ProgressBar {
                                     height: 5px;
                                     indeterminate: root.progress-indeterminate;
                                     progress: root.progress-fraction;
@@ -564,7 +567,8 @@ export component AppWindow inherits Window {
                                         }
                                     }
 
-                                    Switch {
+                                    M3Switch {
+                                        y: (parent.height - self.height) / 2;
                                         text: "Hide owned";
                                         checked <=> root.feed-hide-owned;
                                         toggled => { root.feed-filters-changed(); }
@@ -673,7 +677,7 @@ export component AppWindow inherits Window {
 
                                     Rectangle { horizontal-stretch: 1; }
 
-                                    ComboBox {
+                                    M3Select {
                                         width: 158px;
                                         height: 34px;
                                         y: (parent.height - self.height) / 2;
@@ -927,7 +931,7 @@ export component AppWindow inherits Window {
 
                                     if root.searching-external-artists : HorizontalLayout {
                                         spacing: 8px;
-                                        Spinner { width: 16px; height: 16px; indeterminate: true; }
+                                        M3Spinner { width: 16px; height: 16px; indeterminate: true; }
                                         Text {
                                             text: "Searching Deezer & MusicBrainz...";
                                             font-size: 12px;
@@ -1087,9 +1091,9 @@ export component AppWindow inherits Window {
                                 // Card 1: Appearance, HiDPI Scaling & Desktop Layout
                                 SectionCard {
                                     title: "Appearance, HiDPI Scaling & Layout";
-                                    subtitle: "Personalize MissNix's Material 3 accent palette, dark/light surface scheme, UI scale factor, and cover-art grid density.";
+                                    subtitle: "Personalize MissNix's OKLCH Material 3 tonal palette (including surfaces, rails, switches & cards), UI scale factor, and grid density.";
 
-                                    Switch {
+                                    M3Switch {
                                         text: "Dark Material 3 Surface Theme";
                                         checked <=> root.pref-dark-mode;
                                         toggled => {
@@ -1099,11 +1103,11 @@ export component AppWindow inherits Window {
                                     }
 
                                     VerticalLayout {
-                                        spacing: 8px;
+                                        spacing: 10px;
                                         alignment: start;
 
                                         Text {
-                                            text: "Accent Color Palette";
+                                            text: "Material 3 Tonal Palette";
                                             font-size: 12.5px;
                                             font-weight: 600;
                                             color: Theme.on-surface;
@@ -1114,7 +1118,7 @@ export component AppWindow inherits Window {
                                             alignment: start;
 
                                             AccentSwatch {
-                                                swatch-color: #d0bcff;
+                                                swatch-color: #c6b8ff;
                                                 label: "Iris";
                                                 selected: root.pref-accent-preset == 0;
                                                 clicked => {
@@ -1123,7 +1127,7 @@ export component AppWindow inherits Window {
                                                 }
                                             }
                                             AccentSwatch {
-                                                swatch-color: #7dd3fc;
+                                                swatch-color: #76d0ff;
                                                 label: "Frost";
                                                 selected: root.pref-accent-preset == 1;
                                                 clicked => {
@@ -1132,7 +1136,7 @@ export component AppWindow inherits Window {
                                                 }
                                             }
                                             AccentSwatch {
-                                                swatch-color: #6ee7b7;
+                                                swatch-color: #6ddeac;
                                                 label: "Emerald";
                                                 selected: root.pref-accent-preset == 2;
                                                 clicked => {
@@ -1141,7 +1145,7 @@ export component AppWindow inherits Window {
                                                 }
                                             }
                                             AccentSwatch {
-                                                swatch-color: #fcd34d;
+                                                swatch-color: #fdb354;
                                                 label: "Amber";
                                                 selected: root.pref-accent-preset == 3;
                                                 clicked => {
@@ -1150,7 +1154,7 @@ export component AppWindow inherits Window {
                                                 }
                                             }
                                             AccentSwatch {
-                                                swatch-color: #fda4af;
+                                                swatch-color: #ffa9ad;
                                                 label: "Coral";
                                                 selected: root.pref-accent-preset == 4;
                                                 clicked => {
@@ -1159,13 +1163,86 @@ export component AppWindow inherits Window {
                                                 }
                                             }
                                             AccentSwatch {
-                                                swatch-color: #fdba74;
+                                                swatch-color: #ffad8d;
                                                 label: "Copper";
                                                 selected: root.pref-accent-preset == 5;
                                                 clicked => {
                                                     root.apply-theme(root.pref-dark-mode, 5);
                                                     root.preferences-changed();
                                                 }
+                                            }
+                                            AccentSwatch {
+                                                swatch-color: #c4c4c4;
+                                                label: "Graphite";
+                                                selected: root.pref-accent-preset == 6;
+                                                clicked => {
+                                                    root.apply-theme(root.pref-dark-mode, 6);
+                                                    root.preferences-changed();
+                                                }
+                                            }
+                                            AccentSwatch {
+                                                swatch-color: Theme.custom-swatch;
+                                                label: "Custom";
+                                                selected: root.pref-accent-preset == 7;
+                                                clicked => {
+                                                    root.apply-theme(root.pref-dark-mode, 7);
+                                                    root.preferences-changed();
+                                                }
+                                            }
+                                        }
+
+                                        // Custom Hex Seed Generator + Live Tonal Strip
+                                        HorizontalLayout {
+                                            spacing: 10px;
+                                            alignment: start;
+
+                                            M3LabeledInput {
+                                                width: 175px;
+                                                placeholder: "#EA6C34";
+                                                text <=> root.pref-custom-accent-hex;
+                                                edited => {
+                                                    root.custom-accent-changed(root.pref-custom-accent-hex, false);
+                                                }
+                                                accepted(val) => {
+                                                    root.custom-accent-changed(val, true);
+                                                }
+                                            }
+
+                                            M3Button {
+                                                y: (parent.height - self.height) / 2;
+                                                variant: root.pref-accent-preset == 7 ? "filled" : "primary-tonal";
+                                                text: "Apply Custom Hex";
+                                                clicked => {
+                                                    root.custom-accent-changed(root.pref-custom-accent-hex, true);
+                                                }
+                                            }
+
+                                            // Live 4-stop Material 3 Tonal Palette Preview Strip
+                                            Rectangle {
+                                                width: 124px;
+                                                height: 32px;
+                                                y: (parent.height - self.height) / 2;
+                                                border-radius: 9px;
+                                                border-width: 1px;
+                                                border-color: Theme.outline;
+                                                clip: true;
+
+                                                HorizontalLayout {
+                                                    spacing: 0px;
+                                                    Rectangle { horizontal-stretch: 1; background: Theme.surface; }
+                                                    Rectangle { horizontal-stretch: 1; background: Theme.surface-container-high; }
+                                                    Rectangle { horizontal-stretch: 1; background: Theme.primary-container; }
+                                                    Rectangle { horizontal-stretch: 1; background: Theme.primary; }
+                                                }
+                                            }
+
+                                            Text {
+                                                text: "Enter any #RRGGBB color to generate a matching dark & light tonal palette.";
+                                                font-size: 11.5px;
+                                                color: Theme.on-surface-muted;
+                                                vertical-alignment: center;
+                                                horizontal-stretch: 1;
+                                                overflow: elide;
                                             }
                                         }
                                     }
@@ -1377,13 +1454,13 @@ export component AppWindow inherits Window {
                                         }
                                     }
 
-                                    Switch {
+                                    M3Switch {
                                         text: "Clean multi-artist collaboration delimiters (';', '/', 'feat.', ', ') into primary artist";
                                         checked <=> root.pref-split-collaborations;
                                         toggled => { root.scan-preferences-changed(); }
                                     }
 
-                                    Switch {
+                                    M3Switch {
                                         text: "Include one-off track artists from 'Various Artists' soundtrack/compilation albums";
                                         checked <=> root.pref-include-compilations;
                                         toggled => { root.scan-preferences-changed(); }
@@ -1446,13 +1523,13 @@ export component AppWindow inherits Window {
                                         }
                                     }
 
-                                    Switch {
+                                    M3Switch {
                                         text: "Smart Local Deduplication — hide releases already in your local music folders";
                                         checked <=> root.pref-hide-owned;
                                         toggled => { root.preferences-changed(); }
                                     }
 
-                                    Switch {
+                                    M3Switch {
                                         text: "Filter out greatest-hits compilations, live bootlegs & karaoke editions";
                                         checked <=> root.pref-hide-noise;
                                         toggled => { root.preferences-changed(); }
@@ -1469,7 +1546,7 @@ export component AppWindow inherits Window {
                                             vertical-alignment: center;
                                             width: 190px;
                                         }
-                                        ComboBox {
+                                        M3Select {
                                             width: 240px;
                                             height: 36px;
                                             model: [
@@ -1501,7 +1578,7 @@ export component AppWindow inherits Window {
                                             vertical-alignment: center;
                                             width: 190px;
                                         }
-                                        ComboBox {
+                                        M3Select {
                                             width: 290px;
                                             height: 36px;
                                             model: [
@@ -1525,7 +1602,7 @@ export component AppWindow inherits Window {
                                             vertical-alignment: center;
                                             width: 190px;
                                         }
-                                        ComboBox {
+                                        M3Select {
                                             width: 290px;
                                             height: 36px;
                                             model: [
@@ -1837,7 +1914,7 @@ export component AppWindow inherits Window {
                                 spacing: 8px;
                                 padding-top: 6px;
                                 vertical-stretch: 0;
-                                Spinner { width: 18px; height: 18px; indeterminate: true; }
+                                M3Spinner { width: 18px; height: 18px; indeterminate: true; }
                                 Text {
                                     text: "Loading tracklist...";
                                     font-size: 12px;

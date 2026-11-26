@@ -35,7 +35,7 @@ MissNix indexes the artists in your local audio collection and checks **Deezer**
   - Pure-Rust MP3 decoding (`nanomp3`) with local preview caching, automatic refresh of expired Deezer CDN tokens, and native audio output via PulseAudio / PipeWire (`libpulse-simple`), ALSA (`libasound`), or `pw-cat` / `paplay` fallback.
 - **Material 3 Desktop Interface (`Slint`)**
   - Unified **Release Radar** with status (`All`, `Unread`, `Upcoming`) and type (`Albums`, `EPs`, `Singles`) filters, viewport-culled cover grid, and one-click **Mute** / **Hide** artist controls right inside the sidebar.
-  - Built-in **HiDPI UI Scaling** (`90%`–`200%`, `Ctrl +` / `Ctrl -` / `Ctrl 0`) for high-resolution displays without compositor scaling, Dark/Light modes, and 6 accent palettes.
+  - Built-in **HiDPI UI Scaling** (`90%`–`200%`, `Ctrl +` / `Ctrl -` / `Ctrl 0`) for high-resolution displays without compositor scaling, Dark/Light modes, 7 curated OKLCH tonal palettes, and custom `#RRGGBB` accent color generation.
 - **Headless CLI Mode**
   - Run `--scan`, `--check`, and `--status` from scripts or a `systemd --user` timer against the same SQLite database (`$XDG_DATA_HOME/missnix/missnix.db`).
 

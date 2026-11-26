@@ -335,8 +335,10 @@ impl ReleaseTrack {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     pub dark_mode: bool,
-    /// `0..=5` Material 3 tonal accent palette preset (`0` = Iris Violet).
+    /// `0..=6` built-in Material 3 tonal accent presets (`0` = Iris Violet), `7` = custom `#RRGGBB`.
     pub accent_preset: u8,
+    /// User-defined `#RRGGBB` seed color used when `accent_preset == 7`.
+    pub custom_accent_hex: String,
     /// `0` = Compact, `1` = Comfortable (default), `2` = Spacious.
     pub grid_density: u8,
     /// UI scale percentage (`75..=250`, default `100`) for HiDPI screens without WM scaling.
@@ -363,6 +365,7 @@ impl Default for AppSettings {
         Self {
             dark_mode: true,
             accent_preset: 0,
+            custom_accent_hex: crate::palette::DEFAULT_CUSTOM_ACCENT_HEX.to_string(),
             grid_density: 1,
             ui_scale_percent: 100,
             preview_volume: 80,
