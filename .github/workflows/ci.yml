@@ -1,0 +1,156 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  cargo:
+    name: Cargo (fmt, clippy, test, build, headless CLI)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install system build and GUI libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            cmake \
+            libfontconfig1-dev \
+            libfreetype-dev \
+            libwayland-dev \
+            libxkbcommon-dev \
+            libx11-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxrandr-dev \
+            libxcb1-dev \
+            libgl1-mesa-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Restore Cargo cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Fetch locked dependencies for offline verification
+        run: cargo fetch --locked
+
+      - name: Run Clippy (-D warnings)
+        run: |
+          set -o pipefail
+          if ! cargo clippy --workspace --all-targets --offline --locked -- -D warnings 2>&1 | tee /tmp/clippy.log; then
+            MSG=$(sed 's/\x1b\[[0-9;]*m//g' /tmp/clippy.log | tail -n 35 | cut -c1-240 | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')
+            echo "::error title=cargo clippy failed::${MSG}"
+            exit 1
+          fi
+
+      - name: Run offline test suite
+        run: |
+          set -o pipefail
+          if ! cargo test --workspace --offline --locked 2>&1 | tee /tmp/cargo_test.log; then
+            MSG=$(sed 's/\x1b\[[0-9;]*m//g' /tmp/cargo_test.log | tail -n 35 | cut -c1-240 | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')
+            echo "::error title=cargo test failed::${MSG}"
+            exit 1
+          fi
+
+      - name: Build full workspace and Slint GUI binary
+        run: cargo build --workspace --offline --locked
+
+      - name: Run headless CLI smoke test
+        run: |
+          set -euo pipefail
+          BIN=./target/debug/missnix
+          "$BIN" --version
+          "$BIN" --help
+          SMOKE_DIR=$(mktemp -d)
+          mkdir -p "$SMOKE_DIR/music/Boards of Canada/1998 - Music Has the Right to Children [FLAC]"
+          printf 'placeholder' > "$SMOKE_DIR/music/Boards of Canada/1998 - Music Has the Right to Children [FLAC]/01 - Wildlife Analysis.flac"
+          OUT=$("$BIN" --db "$SMOKE_DIR/smoke.db" --scan "$SMOKE_DIR/music" --status)
+          echo "$OUT"
+          echo "$OUT" | grep -q "Artists: 1 total (1 tracked"
+          echo "$OUT" | grep -q "Local Albums Indexed: 1"
+          rm -rf "$SMOKE_DIR"
+
+  nix:
+    name: Nix (flake check, build, develop, headless CLI)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v32
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Restore and save Nix store cache
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock', 'Cargo.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 5G
+
+      - name: Run nix flake check
+        run: |
+          set -o pipefail
+          if ! nix flake check --print-build-logs 2>&1 | tee /tmp/nix-check.log; then
+            MSG=$(grep -v 'object files omitted' /tmp/nix-check.log | tail -n 35 | cut -c1-240 | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')
+            echo "::error title=nix flake check failed::${MSG}"
+            exit 1
+          fi
+
+      - name: Run nix build
+        run: |
+          set -o pipefail
+          if ! nix build --print-build-logs 2>&1 | tee /tmp/nix-build.log; then
+            MSG=$(grep -v 'object files omitted' /tmp/nix-build.log | tail -n 35 | cut -c1-240 | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')
+            echo "::error title=nix build failed::${MSG}"
+            exit 1
+          fi
+
+      - name: Verify runtime GUI wrapper and run built binary headlessly
+        run: |
+          set -euo pipefail
+          test -x ./result/bin/missnix
+          test -f ./result/share/applications/missnix.desktop
+          test -f ./result/share/icons/hicolor/scalable/apps/missnix.svg
+          grep -q "LD_LIBRARY_PATH" ./result/bin/missnix
+          grep -qiE "wayland" ./result/bin/missnix
+          grep -qiE "libx11" ./result/bin/missnix
+          grep -qiE "libgl" ./result/bin/missnix
+          ./result/bin/missnix --version
+          ./result/bin/missnix --help
+          SMOKE_DIR=$(mktemp -d)
+          mkdir -p "$SMOKE_DIR/music/Daft Punk/2001 - Discovery"
+          printf 'placeholder' > "$SMOKE_DIR/music/Daft Punk/2001 - Discovery/01 - One More Time.flac"
+          OUT=$(./result/bin/missnix --db "$SMOKE_DIR/nix-smoke.db" --scan "$SMOKE_DIR/music" --status)
+          echo "$OUT"
+          echo "$OUT" | grep -q "Artists: 1 total (1 tracked"
+          echo "$OUT" | grep -q "Local Albums Indexed: 1"
+          rm -rf "$SMOKE_DIR"
+
+      - name: Run workspace tests inside nix develop
+        run: |
+          set -o pipefail
+          if ! nix develop --command cargo test --workspace --locked 2>&1 | tee /tmp/nix-dev.log; then
+            MSG=$(grep -v 'object files omitted' /tmp/nix-dev.log | tail -n 35 | cut -c1-240 | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')
+            echo "::error title=nix develop test failed::${MSG}"
+            exit 1
+          fi

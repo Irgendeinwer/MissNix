@@ -1,0 +1,66 @@
+export struct ReleaseCardData {
+    id: int,
+    artist-id: int,
+    title: string,
+    artist-name: string,
+    release-type: string,       // "ALBUM", "EP", "SINGLE"
+    release-date: string,       // "YYYY-MM-DD"
+    cover: image,
+    has-cover: bool,
+    monogram: string,
+    accent-hue: int,            // 0..5 deterministic palette tint for placeholder art
+    unseen: bool,
+    upcoming: bool,
+    owned-locally: bool,
+    explicit: bool,
+    provider-label: string,
+    external-url: string,
+    musicbrainz-url: string,
+    track-count: int,
+}
+
+export struct TrackRowData {
+    disc-number: int,
+    track-number: int,
+    number-label: string,
+    title: string,
+    duration: string,
+    preview-url: string,
+    has-preview: bool,
+}
+
+export struct ArtistRowData {
+    id: int,
+    name: string,
+    monogram: string,
+    disambiguation: string,
+    source-label: string,
+    status: string,             // "tracked", "muted", "ignored"
+    is-manual: bool,
+    unseen-count: int,
+    release-count: int,
+    last-checked: string,
+    mbid: string,
+    deezer-id: string,
+    external-url: string,
+}
+
+export struct LocalAlbumRowData {
+    title: string,
+    year-label: string,
+    track-count-label: string,
+    sample-path: string,
+}
+
+export struct SearchCandidateRowData {
+    index: int,
+    name: string,
+    subtitle: string,
+    source-badge: string,
+}
+
+export struct FolderRowData {
+    id: int,
+    path: string,
+    stats-label: string,
+}

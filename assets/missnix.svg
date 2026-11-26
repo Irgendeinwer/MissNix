@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1E1B2E"/>
+      <stop offset="100%" stop-color="#12131C"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#D0BCFF"/>
+      <stop offset="100%" stop-color="#7F67BE"/>
+    </linearGradient>
+  </defs>
+  <rect x="12" y="12" width="232" height="232" rx="56" fill="url(#bg)" stroke="#38344C" stroke-width="4"/>
+  <!-- Vinyl / Radar rings -->
+  <circle cx="128" cy="128" r="82" fill="none" stroke="#4A4458" stroke-width="6"/>
+  <circle cx="128" cy="128" r="58" fill="none" stroke="#625B71" stroke-width="5" stroke-dasharray="140 44"/>
+  <circle cx="128" cy="128" r="34" fill="none" stroke="url(#accent)" stroke-width="6"/>
+  <!-- Radar sweep -->
+  <path d="M128 128 L186 70 A82 82 0 0 1 210 128 Z" fill="#D0BCFF" fill-opacity="0.22"/>
+  <line x1="128" y1="128" x2="186" y2="70" stroke="#D0BCFF" stroke-width="5" stroke-linecap="round"/>
+  <!-- Center spindle & new release pulse dot -->
+  <circle cx="128" cy="128" r="11" fill="#E6E0E9"/>
+  <circle cx="174" cy="82" r="9" fill="#D0BCFF"/>
+  <circle cx="174" cy="82" r="15" fill="none" stroke="#D0BCFF" stroke-opacity="0.45" stroke-width="3"/>
+</svg>

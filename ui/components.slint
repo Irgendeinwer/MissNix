@@ -1,0 +1,735 @@
+import { Button, Palette } from "std-widgets.slint";
+import {
+    ArtistRowData,
+    FolderRowData,
+    LocalAlbumRowData,
+    ReleaseCardData,
+    SearchCandidateRowData,
+    TrackRowData,
+} from "models.slint";
+
+export component TonalBadge inherits Rectangle {
+    in property <string> label;
+    in property <brush> badge-bg: Palette.control-background;
+    in property <brush> badge-fg: Palette.control-foreground;
+
+    height: 20px;
+    min-width: txt.preferred-width + 12px;
+    border-radius: 5px;
+    background: root.badge-bg;
+
+    txt := Text {
+        x: 6px;
+        width: parent.width - 12px;
+        height: parent.height;
+        text: root.label;
+        color: root.badge-fg;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.4px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+export component NavRailItem inherits Rectangle {
+    in property <string> label;
+    in property <string> glyph;
+    in property <int> badge-count: 0;
+    in property <bool> active: false;
+    callback clicked();
+
+    height: 40px;
+    border-radius: 10px;
+    background: root.active
+        ? Palette.accent-background.with-alpha(0.20)
+        : (touch.has-hover ? Palette.foreground.with-alpha(0.07) : transparent);
+    border-width: root.active ? 1px : 0px;
+    border-color: Palette.accent-background.with-alpha(0.38);
+
+    animate background { duration: 120ms; }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 10px;
+        spacing: 10px;
+
+        Text {
+            text: root.glyph;
+            font-size: 14px;
+            font-weight: 700;
+            width: 18px;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+            color: root.active ? Palette.accent-background : Palette.foreground.with-alpha(0.75);
+        }
+
+        Text {
+            text: root.label;
+            font-size: 13px;
+            font-weight: root.active ? 700 : 500;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+            color: root.active ? Palette.foreground : Palette.foreground.with-alpha(0.86);
+        }
+
+        if root.badge-count > 0 : Rectangle {
+            width: max(22px, badge-txt.preferred-width + 10px);
+            height: 20px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 10px;
+            background: Palette.accent-background;
+
+            badge-txt := Text {
+                text: root.badge-count > 99 ? "99+" : "\{root.badge-count}";
+                color: Palette.accent-foreground;
+                font-size: 11px;
+                font-weight: 700;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component CoverArtwork inherits Rectangle {
+    in property <image> cover;
+    in property <bool> has-cover: false;
+    in property <string> monogram: "♪";
+    in property <int> accent-hue: 0;
+    in property <length> corner-radius: 10px;
+
+    border-radius: root.corner-radius;
+    clip: true;
+    background: root.accent-hue == 0 ? #332948
+              : root.accent-hue == 1 ? #1f3644
+              : root.accent-hue == 2 ? #2b3a30
+              : root.accent-hue == 3 ? #442b35
+              : root.accent-hue == 4 ? #3c3424
+              : #2b2d42;
+
+    if !root.has-cover : Rectangle {
+        // Subtle concentric vinyl groove rings for missing/loading cover art
+        Rectangle {
+            width: parent.width * 0.68;
+            height: parent.height * 0.68;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            border-radius: self.width / 2;
+            border-width: 1.5px;
+            border-color: #ffffff.with-alpha(0.11);
+            background: #000000.with-alpha(0.16);
+        }
+
+        Rectangle {
+            width: parent.width * 0.36;
+            height: parent.height * 0.36;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            border-radius: self.width / 2;
+            background: Palette.accent-background.with-alpha(0.22);
+            border-width: 1px;
+            border-color: Palette.accent-background.with-alpha(0.45);
+
+            Text {
+                text: root.monogram;
+                font-size: 18px;
+                font-weight: 700;
+                color: #f3edf7;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    if root.has-cover : Image {
+        width: 100%;
+        height: 100%;
+        source: root.cover;
+        image-fit: ImageFit.cover;
+    }
+}
+
+export component ReleaseCard inherits Rectangle {
+    in property <ReleaseCardData> data;
+    in property <bool> selected: false;
+
+    callback select-release(int);
+    callback toggle-seen(int);
+    callback dismiss-release(int);
+    callback open-artist(int);
+
+    border-radius: 12px;
+    background: root.selected
+        ? Palette.control-background.with-alpha(0.65)
+        : (card-touch.has-hover ? Palette.alternate-background.brighter(0.08) : Palette.alternate-background);
+    border-width: root.selected ? 2px : 1px;
+    border-color: root.selected
+        ? Palette.accent-background
+        : (card-touch.has-hover ? Palette.border.with-alpha(0.55) : Palette.border.with-alpha(0.22));
+    clip: true;
+
+    animate border-color { duration: 110ms; }
+
+    card-touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.select-release(root.data.id); }
+    }
+
+    VerticalLayout {
+        padding: 10px;
+        spacing: 8px;
+
+        // Square cover container
+        art-box := Rectangle {
+            height: root.width - 20px;
+
+            CoverArtwork {
+                width: 100%;
+                height: 100%;
+                cover: root.data.cover;
+                has-cover: root.data.has-cover;
+                monogram: root.data.monogram;
+                accent-hue: root.data.accent-hue;
+                corner-radius: 8px;
+            }
+
+            // Top-left release type badge
+            Rectangle {
+                x: 8px;
+                y: 8px;
+                height: 20px;
+                width: type-txt.preferred-width + 12px;
+                border-radius: 5px;
+                background: #121116.with-alpha(0.82);
+
+                type-txt := Text {
+                    text: root.data.release-type;
+                    font-size: 10px;
+                    font-weight: 700;
+                    letter-spacing: 0.5px;
+                    color: root.data.release-type == "ALBUM" ? #d0bcff
+                         : root.data.release-type == "EP" ? #89dceb
+                         : #f9e2af;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            // Top-right status indicator (UPCOMING / IN LIBRARY / NEW)
+            if root.data.upcoming || root.data.owned-locally || root.data.unseen : Rectangle {
+                x: parent.width - self.width - 8px;
+                y: 8px;
+                height: 20px;
+                width: flag-txt.preferred-width + 12px;
+                border-radius: 5px;
+                background: root.data.upcoming ? #1e4d3b.with-alpha(0.92)
+                          : root.data.owned-locally ? #323544.with-alpha(0.90)
+                          : Palette.accent-background;
+
+                flag-txt := Text {
+                    text: root.data.upcoming ? "UPCOMING"
+                        : root.data.owned-locally ? "IN LIBRARY"
+                        : "NEW";
+                    font-size: 10px;
+                    font-weight: 700;
+                    color: root.data.upcoming ? #a6f4c5
+                         : root.data.owned-locally ? #cfd4e6
+                         : Palette.accent-foreground;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            // Desktop hover action pills (bottom-right of cover)
+            HorizontalLayout {
+                x: parent.width - self.preferred-width - 8px;
+                y: parent.height - 32px;
+                height: 26px;
+                spacing: 6px;
+                opacity: (card-touch.has-hover || seen-touch.has-hover || dismiss-touch.has-hover || root.selected) ? 1.0 : 0.0;
+                animate opacity { duration: 110ms; }
+
+                Rectangle {
+                    width: seen-lbl.preferred-width + 14px;
+                    height: 26px;
+                    border-radius: 6px;
+                    background: #141318.with-alpha(0.88);
+                    border-width: 1px;
+                    border-color: Palette.accent-background.with-alpha(0.6);
+
+                    seen-lbl := Text {
+                        text: root.data.unseen ? "✓ Seen" : "↺ Unread";
+                        font-size: 11px;
+                        font-weight: 600;
+                        color: #f2eef8;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    seen-touch := TouchArea {
+                        enabled: parent.opacity > 0.1;
+                        mouse-cursor: pointer;
+                        clicked => { root.toggle-seen(root.data.id); }
+                    }
+                }
+
+                Rectangle {
+                    width: 26px;
+                    height: 26px;
+                    border-radius: 6px;
+                    background: #141318.with-alpha(0.88);
+                    border-width: 1px;
+                    border-color: #ffffff.with-alpha(0.22);
+
+                    Text {
+                        text: "✕";
+                        font-size: 11px;
+                        font-weight: 700;
+                        color: #f2b8b5;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    dismiss-touch := TouchArea {
+                        enabled: parent.opacity > 0.1;
+                        mouse-cursor: pointer;
+                        clicked => { root.dismiss-release(root.data.id); }
+                    }
+                }
+            }
+        }
+
+        // Metadata stack
+        VerticalLayout {
+            spacing: 3px;
+            vertical-stretch: 1;
+
+            Text {
+                text: root.data.title;
+                font-size: 13px;
+                font-weight: 700;
+                color: Palette.foreground;
+                overflow: elide;
+            }
+
+            Rectangle {
+                height: 18px;
+                Text {
+                    width: 100%;
+                    height: 100%;
+                    text: root.data.artist-name;
+                    font-size: 12px;
+                    font-weight: 500;
+                    color: artist-touch.has-hover ? Palette.accent-background : Palette.foreground.with-alpha(0.75);
+                    overflow: elide;
+                    vertical-alignment: center;
+                }
+                artist-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.open-artist(root.data.artist-id); }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 6px;
+                Text {
+                    text: root.data.release-date != "" ? root.data.release-date : "Date TBA";
+                    font-size: 11px;
+                    color: Palette.foreground.with-alpha(0.56);
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                }
+
+                if root.data.track-count > 0 : Text {
+                    text: "\{root.data.track-count} trk";
+                    font-size: 11px;
+                    color: Palette.foreground.with-alpha(0.50);
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+}
+
+export component TrackRow inherits Rectangle {
+    in property <TrackRowData> track;
+    callback play-preview(string);
+
+    height: 36px;
+    border-radius: 6px;
+    background: row-touch.has-hover ? Palette.foreground.with-alpha(0.05) : transparent;
+
+    row-touch := TouchArea {}
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 8px;
+
+        Text {
+            text: root.track.number-label;
+            width: 28px;
+            font-size: 11px;
+            color: Palette.foreground.with-alpha(0.50);
+            vertical-alignment: center;
+            horizontal-alignment: right;
+        }
+
+        Text {
+            text: root.track.title;
+            font-size: 12px;
+            font-weight: 500;
+            color: Palette.foreground;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+
+        if root.track.has-preview : Rectangle {
+            width: 58px;
+            height: 22px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 5px;
+            background: prev-touch.has-hover
+                ? Palette.accent-background.with-alpha(0.28)
+                : Palette.control-background;
+
+            Text {
+                text: "▶ 30s";
+                font-size: 10px;
+                font-weight: 700;
+                color: Palette.control-foreground;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            prev-touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.play-preview(root.track.preview-url); }
+            }
+        }
+
+        Text {
+            text: root.track.duration;
+            width: 38px;
+            font-size: 11px;
+            color: Palette.foreground.with-alpha(0.56);
+            vertical-alignment: center;
+            horizontal-alignment: right;
+        }
+    }
+}
+
+export component ArtistListRow inherits Rectangle {
+    in property <ArtistRowData> artist;
+    in property <bool> selected: false;
+
+    callback select-artist(int);
+    callback quick-check(int);
+    callback toggle-mute(int);
+    callback toggle-ignore(int);
+
+    height: 62px;
+    border-radius: 10px;
+    background: root.selected
+        ? Palette.control-background.with-alpha(0.65)
+        : (row-touch.has-hover ? Palette.alternate-background.brighter(0.06) : Palette.alternate-background);
+    border-width: root.selected ? 1.5px : 1px;
+    border-color: root.selected ? Palette.accent-background : Palette.border.with-alpha(0.20);
+
+    row-touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.select-artist(root.artist.id); }
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 12px;
+
+        // Monogram avatar
+        Rectangle {
+            width: 38px;
+            height: 38px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 19px;
+            background: root.artist.status == "tracked"
+                ? Palette.accent-background.with-alpha(0.22)
+                : Palette.foreground.with-alpha(0.09);
+
+            Text {
+                text: root.artist.monogram;
+                font-size: 14px;
+                font-weight: 700;
+                color: root.artist.status == "tracked" ? Palette.accent-background : Palette.foreground.with-alpha(0.55);
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 3px;
+            horizontal-stretch: 1;
+
+            HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    text: root.artist.name;
+                    font-size: 14px;
+                    font-weight: 700;
+                    color: root.artist.status == "ignored"
+                        ? Palette.foreground.with-alpha(0.48)
+                        : Palette.foreground;
+                    overflow: elide;
+                    vertical-alignment: center;
+                }
+
+                if root.artist.disambiguation != "" : Text {
+                    text: "· \{root.artist.disambiguation}";
+                    font-size: 11px;
+                    color: Palette.foreground.with-alpha(0.52);
+                    overflow: elide;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 10px;
+                Text {
+                    text: root.artist.source-label;
+                    font-size: 11px;
+                    color: Palette.foreground.with-alpha(0.62);
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: root.artist.last-checked;
+                    font-size: 11px;
+                    color: Palette.foreground.with-alpha(0.45);
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        if root.artist.unseen-count > 0 : Rectangle {
+            width: 62px;
+            height: 22px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 11px;
+            background: Palette.accent-background.with-alpha(0.22);
+
+            Text {
+                text: "\{root.artist.unseen-count} new";
+                font-size: 11px;
+                font-weight: 700;
+                color: Palette.accent-background;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        TonalBadge {
+            y: (parent.height - self.height) / 2;
+            label: root.artist.status == "tracked" ? "TRACKED"
+                 : root.artist.status == "muted" ? "MUTED"
+                 : "IGNORED";
+            badge-bg: root.artist.status == "tracked" ? Palette.control-background
+                    : root.artist.status == "muted" ? #4a3f28
+                    : #432b2e;
+            badge-fg: root.artist.status == "tracked" ? Palette.control-foreground
+                    : root.artist.status == "muted" ? #f7d996
+                    : #f2b8b5;
+        }
+
+        Button {
+            height: 34px;
+            y: (parent.height - self.height) / 2;
+            text: root.artist.status == "muted" ? "Unmute" : "Mute";
+            clicked => { root.toggle-mute(root.artist.id); }
+        }
+
+        Button {
+            height: 34px;
+            y: (parent.height - self.height) / 2;
+            text: root.artist.status == "ignored" ? "Restore" : "Ignore";
+            clicked => { root.toggle-ignore(root.artist.id); }
+        }
+    }
+}
+
+export component SearchCandidateRow inherits Rectangle {
+    in property <SearchCandidateRowData> candidate;
+    callback add-candidate(int);
+
+    height: 46px;
+    border-radius: 8px;
+    background: Palette.alternate-background;
+    border-width: 1px;
+    border-color: Palette.border.with-alpha(0.24);
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 10px;
+        spacing: 10px;
+
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            spacing: 2px;
+
+            Text {
+                text: root.candidate.name;
+                font-size: 13px;
+                font-weight: 700;
+                color: Palette.foreground;
+                overflow: elide;
+            }
+            if root.candidate.subtitle != "" : Text {
+                text: root.candidate.subtitle;
+                font-size: 11px;
+                color: Palette.foreground.with-alpha(0.60);
+                overflow: elide;
+            }
+        }
+
+        TonalBadge {
+            y: (parent.height - self.height) / 2;
+            label: root.candidate.source-badge;
+        }
+
+        Button {
+            height: 32px;
+            y: (parent.height - self.height) / 2;
+            text: "Track";
+            primary: true;
+            clicked => { root.add-candidate(root.candidate.index); }
+        }
+    }
+}
+
+export component LocalAlbumItem inherits Rectangle {
+    in property <LocalAlbumRowData> album;
+
+    height: 44px;
+    border-radius: 8px;
+    background: Palette.background.with-alpha(0.55);
+    border-width: 1px;
+    border-color: Palette.border.with-alpha(0.18);
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 8px;
+
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            spacing: 2px;
+
+            Text {
+                text: root.album.title;
+                font-size: 12px;
+                font-weight: 600;
+                color: Palette.foreground;
+                overflow: elide;
+            }
+            Text {
+                text: root.album.track-count-label;
+                font-size: 10px;
+                color: Palette.foreground.with-alpha(0.54);
+                overflow: elide;
+            }
+        }
+
+        if root.album.year-label != "" : TonalBadge {
+            y: (parent.height - self.height) / 2;
+            label: root.album.year-label;
+        }
+    }
+}
+
+export component FolderItemRow inherits Rectangle {
+    in property <FolderRowData> folder;
+    callback remove-folder(int);
+
+    height: 52px;
+    border-radius: 8px;
+    background: Palette.background.with-alpha(0.55);
+    border-width: 1px;
+    border-color: Palette.border.with-alpha(0.22);
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 10px;
+        spacing: 12px;
+
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            spacing: 2px;
+
+            Text {
+                text: root.folder.path;
+                font-size: 13px;
+                font-weight: 600;
+                color: Palette.foreground;
+                overflow: elide;
+            }
+            Text {
+                text: root.folder.stats-label;
+                font-size: 11px;
+                color: Palette.foreground.with-alpha(0.58);
+                overflow: elide;
+            }
+        }
+
+        Button {
+            height: 34px;
+            y: (parent.height - self.height) / 2;
+            text: "Remove";
+            clicked => { root.remove-folder(root.folder.id); }
+        }
+    }
+}
+
+export component SectionCard inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle: "";
+
+    border-radius: 12px;
+    background: Palette.alternate-background;
+    border-width: 1px;
+    border-color: Palette.border.with-alpha(0.24);
+
+    VerticalLayout {
+        padding: 18px;
+        spacing: 12px;
+
+        VerticalLayout {
+            spacing: 3px;
+            Text {
+                text: root.title;
+                font-size: 15px;
+                font-weight: 700;
+                color: Palette.foreground;
+            }
+            if root.subtitle != "" : Text {
+                text: root.subtitle;
+                font-size: 12px;
+                color: Palette.foreground.with-alpha(0.62);
+                wrap: word-wrap;
+            }
+        }
+
+        @children
+    }
+}

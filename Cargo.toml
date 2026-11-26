@@ -1,0 +1,33 @@
+[workspace]
+members = ["crates/missnix-core", "."]
+resolver = "2"
+
+[package]
+name = "missnix"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Desktop local music release radar built with Rust, Slint Material, SQLite, and Deezer + MusicBrainz"
+default-run = "missnix"
+
+[dependencies]
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+missnix-core = { path = "crates/missnix-core" }
+open = "5.3"
+slint = { version = "1.19", default-features = false, features = [
+    "std",
+    "compat-1-2",
+    "backend-winit",
+    "renderer-femtovg",
+    "renderer-software",
+    "accessibility",
+    "image-default-formats",
+] }
+
+[build-dependencies]
+slint-build = "1.19"
+
+[profile.release]
+opt-level = 2
+codegen-units = 16
+strip = "debuginfo"
