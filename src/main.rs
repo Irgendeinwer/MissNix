@@ -18,6 +18,7 @@ fn main() -> ExitCode {
     let mut scan_folders_cli: Vec<String> = Vec::new();
     let mut run_check_cli = false;
     let mut print_status_cli = false;
+    let mut cli_scale_override: Option<u16> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -37,6 +38,22 @@ fn main() -> ExitCode {
                 } else {
                     eprintln!("Error: --db requires a file path");
                     return ExitCode::FAILURE;
+                }
+            }
+            "--scale" => {
+                i += 1;
+                let Some(raw) = args.get(i) else {
+                    eprintln!("Error: --scale requires a percentage (75..250, e.g. 125 or 150)");
+                    return ExitCode::FAILURE;
+                };
+                match raw.trim_end_matches('%').parse::<u16>() {
+                    Ok(pct) if (75..=250).contains(&pct) => {
+                        cli_scale_override = Some(pct);
+                    }
+                    _ => {
+                        eprintln!("Error: --scale must be between 75 and 250 (got '{raw}')");
+                        return ExitCode::FAILURE;
+                    }
                 }
             }
             "--scan" => {
@@ -83,7 +100,7 @@ fn main() -> ExitCode {
         }
     };
 
-    let (_ui_state, _schedule_timer) = match controller::wire_controller(&app, paths) {
+    let (_ui_state, _timers) = match controller::wire_controller(&app, paths, cli_scale_override) {
         Ok(handles) => handles,
         Err(err) => {
             eprintln!("Failed to initialize MissNix state: {err}");
@@ -183,6 +200,7 @@ fn print_help() {
            missnix [OPTIONS]\n\n\
          OPTIONS:\n  \
            --db <FILE>       Override SQLite database file path\n  \
+           --scale <PCT>     Set HiDPI UI scale percentage (75..250, e.g. 125 or 150)\n  \
            --scan <FOLDER>   Add & scan a local music folder headlessly\n  \
            --check           Check Deezer + MusicBrainz for new releases headlessly\n  \
            --status          Print tracked artist & unread release counts\n  \

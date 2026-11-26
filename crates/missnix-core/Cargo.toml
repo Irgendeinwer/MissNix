@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "Core library scanner, SQLite state persistence, smart deduplication, and Deezer/MusicBrainz release radar engine for MissNix"
+repository = "https://github.com/Irgendeinwer/MissNix"
+homepage = "https://github.com/Irgendeinwer/MissNix"
 
 [dependencies]
 dirs = "6.0"

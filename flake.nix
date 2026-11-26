@@ -8,6 +8,8 @@
   outputs =
     { self, nixpkgs }:
     let
+      cargoMeta = builtins.fromTOML (builtins.readFile ./Cargo.toml);
+
       supportedSystems = [
         "x86_64-linux"
         "aarch64-linux"
@@ -68,7 +70,7 @@
         in
         pkgs.rustPlatform.buildRustPackage {
           pname = "missnix";
-          version = "0.1.0";
+          version = cargoMeta.package.version;
 
           src = lib.cleanSource self;
 
@@ -121,6 +123,7 @@
 
           meta = {
             description = "Standalone desktop release radar for artists in your local music collection";
+            homepage = "https://github.com/Irgendeinwer/MissNix";
             license = lib.licenses.mit;
             mainProgram = "missnix";
             platforms = supportedSystems;

@@ -746,9 +746,6 @@ export component ReleaseCard inherits Rectangle {
         : (card-touch.has-hover ? Theme.outline : Theme.outline-variant);
     clip: true;
 
-    animate background { duration: 130ms; easing: ease-out; }
-    animate border-color { duration: 130ms; easing: ease-out; }
-
     card-touch := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.select-release(root.data.id); }
@@ -837,12 +834,12 @@ export component ReleaseCard inherits Rectangle {
 
             // Desktop hover action pills (bottom-right of cover)
             HorizontalLayout {
+                property <bool> show-pills: card-touch.has-hover || seen-touch.has-hover || dismiss-touch.has-hover || root.selected;
+                visible: self.show-pills;
                 x: parent.width - self.preferred-width - 8px;
                 y: parent.height - 34px;
                 height: 26px;
                 spacing: 6px;
-                opacity: (card-touch.has-hover || seen-touch.has-hover || dismiss-touch.has-hover || root.selected) ? 1.0 : 0.0;
-                animate opacity { duration: 130ms; easing: ease-out; }
 
                 Rectangle {
                     width: seen-row.preferred-width;
@@ -875,7 +872,6 @@ export component ReleaseCard inherits Rectangle {
                     }
 
                     seen-touch := TouchArea {
-                        enabled: parent.opacity > 0.1;
                         mouse-cursor: pointer;
                         clicked => { root.toggle-seen(root.data.id); }
                     }
@@ -899,7 +895,6 @@ export component ReleaseCard inherits Rectangle {
                     }
 
                     dismiss-touch := TouchArea {
-                        enabled: parent.opacity > 0.1;
                         mouse-cursor: pointer;
                         clicked => { root.dismiss-release(root.data.id); }
                     }
@@ -1395,7 +1390,7 @@ export component PreviewMiniPlayer inherits Rectangle {
                 horizontal-alignment: right;
             }
 
-            // Interactive Seek Track
+            // Interactive Seek Track (left-anchored progress fill + drag scrubbing)
             seek-area := Rectangle {
                 horizontal-stretch: 1;
                 height: 28px;
@@ -1404,11 +1399,15 @@ export component PreviewMiniPlayer inherits Rectangle {
                 Rectangle {
                     width: 100%;
                     height: 6px;
+                    x: 0px;
                     y: (parent.height - self.height) / 2;
                     border-radius: 3px;
                     background: Theme.surface-container-highest;
+                    clip: true;
 
                     Rectangle {
+                        x: 0px;
+                        y: 0px;
                         width: parent.width * max(0.0, min(1.0, root.progress));
                         height: 100%;
                         border-radius: 3px;
@@ -1418,7 +1417,7 @@ export component PreviewMiniPlayer inherits Rectangle {
 
                 // Scrubber thumb
                 Rectangle {
-                    width: seek-touch.has-hover ? 14px : 10px;
+                    width: seek-touch.has-hover || seek-touch.pressed ? 14px : 10px;
                     height: self.width;
                     x: max(0px, min(parent.width - self.width, parent.width * max(0.0, min(1.0, root.progress)) - self.width / 2));
                     y: (parent.height - self.height) / 2;
@@ -1432,6 +1431,11 @@ export component PreviewMiniPlayer inherits Rectangle {
                     mouse-cursor: pointer;
                     clicked => {
                         root.seek(max(0.0, min(1.0, self.mouse-x / parent.width)));
+                    }
+                    moved => {
+                        if (self.pressed) {
+                            root.seek(max(0.0, min(1.0, self.mouse-x / parent.width)));
+                        }
                     }
                 }
             }
@@ -1470,11 +1474,15 @@ export component PreviewMiniPlayer inherits Rectangle {
                 Rectangle {
                     width: 100%;
                     height: 5px;
+                    x: 0px;
                     y: (parent.height - self.height) / 2;
                     border-radius: 2.5px;
                     background: Theme.surface-container-highest;
+                    clip: true;
 
                     Rectangle {
+                        x: 0px;
+                        y: 0px;
                         width: parent.width * (root.volume-pct / 100.0);
                         height: 100%;
                         border-radius: 2.5px;

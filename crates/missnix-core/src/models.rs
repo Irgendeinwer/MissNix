@@ -339,6 +339,8 @@ pub struct AppSettings {
     pub accent_preset: u8,
     /// `0` = Compact, `1` = Comfortable (default), `2` = Spacious.
     pub grid_density: u8,
+    /// UI scale percentage (`75..=250`, default `100`) for HiDPI screens without WM scaling.
+    pub ui_scale_percent: u16,
     /// `0..=100` in-app 30s preview audio volume percentage.
     pub preview_volume: u8,
     /// `0` means all time; otherwise number of days to look back (`90`, `180`, `365`, `730`).
@@ -362,6 +364,7 @@ impl Default for AppSettings {
             dark_mode: true,
             accent_preset: 0,
             grid_density: 1,
+            ui_scale_percent: 100,
             preview_volume: 80,
             lookback_days: 365,
             include_albums: true,
@@ -430,6 +433,8 @@ pub struct FeedQuery {
     pub include_eps: bool,
     pub include_singles: bool,
     pub only_unseen: bool,
+    pub only_upcoming: bool,
+    pub only_seen: bool,
     pub hide_owned: bool,
     pub include_dismissed: bool,
     pub artist_id: Option<i64>,

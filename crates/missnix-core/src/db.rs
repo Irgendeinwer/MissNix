@@ -427,9 +427,11 @@ impl Database {
         let trimmed = search.trim();
         if !trimmed.is_empty() {
             let norm = normalize_artist_name(trimmed);
-            let like_raw = format!("%{}%", trimmed.to_lowercase());
-            let like_norm = format!("%{norm}%");
-            sql.push_str(" AND (LOWER(a.name) LIKE ? OR a.normalized_name LIKE ?)");
+            let like_raw = format!("%{}%", escape_sql_like(&trimmed.to_lowercase()));
+            let like_norm = format!("%{}%", escape_sql_like(&norm));
+            sql.push_str(
+                " AND (LOWER(a.name) LIKE ? ESCAPE '\\' OR a.normalized_name LIKE ? ESCAPE '\\')",
+            );
             bind_vals.push(Box::new(like_raw));
             bind_vals.push(Box::new(like_norm));
         }
@@ -780,16 +782,30 @@ impl Database {
                 r.provider_source, r.discovered_at
              FROM releases r
              JOIN artists a ON a.id = r.artist_id
-             WHERE a.status = 'tracked'",
+             WHERE 1 = 1",
         );
 
         let mut bind_vals: Vec<Box<dyn ToSql>> = Vec::new();
+
+        // When viewing a specific artist's drops explicitly, allow muted/ignored status;
+        // otherwise the global Release Radar shows tracked artists only.
+        if query.artist_id.is_none() {
+            sql.push_str(" AND a.status = 'tracked'");
+        }
 
         if !query.include_dismissed {
             sql.push_str(" AND r.state != 'dismissed'");
         }
         if query.only_unseen {
             sql.push_str(" AND r.state = 'unseen'");
+        }
+        if query.only_seen {
+            sql.push_str(" AND r.state = 'seen'");
+        }
+        if query.only_upcoming {
+            let today = today_iso_utc();
+            sql.push_str(" AND LENGTH(r.release_date) >= 10 AND r.release_date > ?");
+            bind_vals.push(Box::new(today));
         }
         if query.hide_owned {
             sql.push_str(" AND r.owned_locally = 0");
@@ -829,10 +845,10 @@ impl Database {
 
         let trimmed = query.search.trim();
         if !trimmed.is_empty() {
-            let like_raw = format!("%{}%", trimmed.to_lowercase());
-            let norm_t = format!("%{}%", normalize_release_title(trimmed));
+            let like_raw = format!("%{}%", escape_sql_like(&trimmed.to_lowercase()));
+            let norm_t = format!("%{}%", escape_sql_like(&normalize_release_title(trimmed)));
             sql.push_str(
-                " AND (LOWER(r.title) LIKE ? OR LOWER(a.name) LIKE ? OR r.normalized_title LIKE ?)",
+                " AND (LOWER(r.title) LIKE ? ESCAPE '\\' OR LOWER(a.name) LIKE ? ESCAPE '\\' OR r.normalized_title LIKE ? ESCAPE '\\')",
             );
             bind_vals.push(Box::new(like_raw.clone()));
             bind_vals.push(Box::new(like_raw));
@@ -1001,6 +1017,11 @@ impl Database {
                         s.grid_density = n.min(2);
                     }
                 }
+                "ui_scale_percent" => {
+                    if let Ok(n) = v.parse::<u16>() {
+                        s.ui_scale_percent = n.clamp(75, 250);
+                    }
+                }
                 "preview_volume" => {
                     if let Ok(n) = v.parse::<u8>() {
                         s.preview_volume = n.min(100);
@@ -1035,10 +1056,14 @@ impl Database {
 
     pub fn save_settings(&mut self, s: &AppSettings) -> CoreResult<()> {
         let tx = self.conn.transaction()?;
-        let pairs: [(&str, String); 15] = [
+        let pairs: [(&str, String); 16] = [
             ("dark_mode", s.dark_mode.to_string()),
             ("accent_preset", s.accent_preset.to_string()),
             ("grid_density", s.grid_density.to_string()),
+            (
+                "ui_scale_percent",
+                s.ui_scale_percent.clamp(75, 250).to_string(),
+            ),
             ("preview_volume", s.preview_volume.to_string()),
             ("lookback_days", s.lookback_days.to_string()),
             ("include_albums", s.include_albums.to_string()),
@@ -1120,6 +1145,17 @@ impl Database {
             unseen_releases: unseen_releases as usize,
         })
     }
+}
+
+fn escape_sql_like(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        if matches!(ch, '\\' | '%' | '_') {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
 }
 
 fn map_folder_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<LibraryFolder> {
@@ -2307,11 +2343,12 @@ mod tests {
         assert!(names.contains(&"Muted Local"));
         assert!(!names.contains(&"Alligatoah, Jamal"));
 
-        // Persist and reload customization & scan settings
+        // Persist and reload customization & scan settings (including HiDPI UI scale)
         let custom = AppSettings {
             dark_mode: false,
             accent_preset: 3,
             grid_density: 2,
+            ui_scale_percent: 150,
             preview_volume: 65,
             artist_discovery_mode: ArtistDiscoveryMode::FolderOnly,
             split_collaborations: false,
@@ -2322,11 +2359,16 @@ mod tests {
         assert!(!loaded.dark_mode);
         assert_eq!(loaded.accent_preset, 3);
         assert_eq!(loaded.grid_density, 2);
+        assert_eq!(loaded.ui_scale_percent, 150);
         assert_eq!(loaded.preview_volume, 65);
         assert_eq!(
             loaded.artist_discovery_mode,
             ArtistDiscoveryMode::FolderOnly
         );
         assert!(!loaded.split_collaborations);
+
+        // Literal `%` and `_` in search queries do not act as SQLite wildcards
+        assert_eq!(escape_sql_like("99.9%_test\\x"), "99.9\\%\\_test\\\\x");
+        assert!(db.list_artists("%", None, false).unwrap().is_empty());
     }
 }

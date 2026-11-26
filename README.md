@@ -1,94 +1,161 @@
-# MissNix
+<div align="center">
 
-**MissNix** is a standalone desktop **Local Music Release Tracker** written in **Rust** with a **Slint** Material interface and **SQLite (`rusqlite`)** persistence. Point it at your local music folders and MissNix builds an artist roster from your audio files, checks **Deezer** and **MusicBrainz** for new albums, EPs, and singles, deduplicates against albums you already own locally, and surfaces genuinely new drops in a cover-art-driven desktop feed.
+<img src="assets/docs/banner.svg" alt="MissNix — Local Music Release Radar" width="100%" />
 
----
+<br />
 
-## Key Capabilities
+[![CI](https://github.com/Irgendeinwer/MissNix/actions/workflows/ci.yml/badge.svg)](https://github.com/Irgendeinwer/MissNix/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Irgendeinwer/MissNix?include_prereleases&label=release&color=7c66b8)](https://github.com/Irgendeinwer/MissNix/releases)
+[![Nix Flake](https://img.shields.io/badge/Nix-Flake-5277C3?logo=nixos&logoColor=white)](flake.nix)
+[![Rust](https://img.shields.io/badge/Rust-2021-d0bcff?logo=rust&logoColor=white)](Cargo.toml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-34d399)](LICENSE)
 
-- **Local Music Artist Discovery (`lofty` + configurable `ALBUMARTIST` / Folder modes)**
-  - Recursively scans FLAC, MP3, Ogg Vorbis, Opus, M4A/MP4, WAV, AIFF, AAC, APE, and WavPack files.
-  - Configurable discovery source (**Album Artist + Folder [Default]**, **Folder Structure Only**, or **All Metadata Tags + Folder**) plus intelligent multi-artist collaboration delimiter parsing (`;`, `/`, `feat.`, `, `) so combined credits never create fake duplicate artists, while preserving genuine comma/slash band names (`Tyler, The Creator`, `Earth, Wind & Fire`, `AC/DC`).
-  - Automatically prunes stale zero-track local entries on rescan while preserving manual artists and muted/ignored preferences.
-- **Native In-App 30-Second Audio Preview Player**
-  - Decodes Deezer 30s MP3 previews in pure Rust (`nanomp3`) with local disk caching, automatic expired CDN token refresh, and low-latency native audio output via PulseAudio / PipeWire (`libpulse-simple`), ALSA (`libasound`), or system audio fallback — right inside a docked Material 3 Mini-Player with seek, volume control, and live equalizer bars.
-- **Persistent SQLite State (`rusqlite`)**
-  - Stores library folders, discovered & manual artists, indexed local albums, remote releases, cached tracklists, and preferences in `$XDG_DATA_HOME/missnix/missnix.db` (WAL mode).
-  - Remembers `unseen`, `seen`, and `dismissed` release states as well as `tracked`, `muted`, and `ignored` artist states across restarts and rescans.
-- **Dual-Provider Release Radar (Deezer + MusicBrainz)**
-  - **Deezer API** provides fast artist search, artist portraits, discography lookups, high-resolution cover artwork, explicit badges, tracklists, and 30-second audio previews with zero API keys.
-  - **MusicBrainz API + Cover Art Archive** resolves canonical MBIDs (including embedded `MusicBrainz Artist Id` tags from Picard/beets), extracts linked Deezer artist URLs, and cross-checks release groups so indie/Bandcamp-first releases aren't missed.
-  - Disambiguates artist homonyms by scoring candidate discographies against the albums you already own locally, collapses duplicate Deluxe/Remastered/Regional editions, and flags locally owned albums automatically.
-- **Material 3 for Desktop UI & Customization**
-  - Custom vector SVG icon system & dynamic animated radar emblem, Dark/Light Material 3 surface containers, 6 live accent color palettes (**Iris**, **Frost**, **Emerald**, **Amber**, **Coral**, **Copper**), and configurable cover-grid density (**Compact**, **Comfortable**, **Spacious**).
-  - Bounded Material 3 pill buttons, filter chips, labeled inputs, smooth drawer/navigation animations, and responsive max-width containers across compact laptops and ultrawide monitors.
+</div>
+
+**MissNix** scans your local music folders, builds a clean list of the artists you listen to, and checks **Deezer** and **MusicBrainz** for new and upcoming albums, EPs, and singles — hiding releases you already own locally and playing 30-second previews directly in the app.
+
+<div align="center">
+  <img src="assets/docs/ui-preview.svg" alt="MissNix Desktop Interface" width="100%" />
+</div>
 
 ---
 
-## Workspace Layout
+## Features
 
-```text
-MissNix/
-├── flake.nix                         # Nix package, app, overlay, check, and devShell
-├── Cargo.toml                        # Workspace + Slint desktop binary crate (`missnix`)
-├── Cargo.lock                        # Pinned dependency lockfile
-├── build.rs                          # Compiles Slint UI with Material style
-├── src/
-│   ├── main.rs                       # Entrypoint (Slint GUI + optional headless CLI flags)
-│   ├── controller.rs                 # Non-blocking UI <-> missnix-core reactive bridge
-│   └── folder_picker.rs              # Native desktop folder selection helper
-├── ui/
-│   ├── models.slint                  # Shared UI structs
-│   ├── components.slint              # Reusable Material cards, badges, and list rows
-│   └── app-window.slint              # 3-pane desktop application window
-└── crates/
-    └── missnix-core/                 # Pure-Rust GUI-independent core library
-        └── src/
-            ├── db.rs                 # SQLite schema, migrations, queries & deduplication
-            ├── models.rs             # Domain types & settings
-            ├── normalize.rs          # Artist/edition normalization & UTC date helpers
-            ├── scanner.rs            # Audio tag + directory structure scanner
-            ├── sync.rs               # Multi-provider sync engine & cover cache
-            └── providers/
-                ├── deezer.rs         # Deezer REST client & homonym scorer
-                └── musicbrainz.rs    # MusicBrainz WS/2 client (1.1s rate-limited)
-```
+- **Clean Local Artist Discovery (`lofty` + folder hierarchy)**
+  - Scans FLAC, MP3, Ogg Vorbis, Opus, M4A/MP4, WAV, AIFF, AAC, APE, and WavPack files.
+  - Configurable discovery source: **Album Artist + Folder** (default), **Folder Structure Only**, or **All Metadata Tags + Folder**.
+  - Splits multi-artist collaboration tags (`;`, `/`, `feat.`, `, `) into primary artists while keeping real comma/slash band names (`Tyler, The Creator`, `Black Country, New Road`, `Earth, Wind & Fire`, `AC/DC`) intact.
+- **Dual-Source Release Lookup & Deduplication**
+  - Queries **Deezer** (artwork, tracklists, 30s previews, explicit flags) and **MusicBrainz** (canonical MBIDs, Cover Art Archive, upcoming release groups) with no API keys required.
+  - Scores artist homonyms against your local albums, collapses duplicate Deluxe/Remastered editions, and suppresses albums already present on disk.
+- **In-App 30-Second Audio Preview Player**
+  - Pure-Rust MP3 decoding (`nanomp3`) with local preview caching, automatic refresh of expired Deezer CDN tokens, and native audio output via PulseAudio / PipeWire (`libpulse-simple`), ALSA (`libasound`), or `pw-cat` / `paplay` fallback.
+- **Material 3 Desktop Interface (`Slint`)**
+  - Unified **Release Radar** with status (`All`, `Unread`, `Upcoming`) and type (`Albums`, `EPs`, `Singles`) filters, viewport-culled cover grid, and one-click **Mute** / **Hide** artist controls right inside the sidebar.
+  - Built-in **HiDPI UI Scaling** (`90%`–`200%`, `Ctrl +` / `Ctrl -` / `Ctrl 0`) for high-resolution displays without compositor scaling, Dark/Light modes, and 6 accent palettes.
+- **Headless CLI Mode**
+  - Run `--scan`, `--check`, and `--status` from scripts or a `systemd --user` timer against the same SQLite database (`$XDG_DATA_HOME/missnix/missnix.db`).
 
 ---
 
-## Building & Running with Nix
+## Installation & Usage
 
-Run directly with Flakes enabled:
+### Nix Flake (NixOS / Linux / macOS)
+
+Run directly without installing:
 
 ```bash
-nix run .
+nix run github:Irgendeinwer/MissNix
 ```
 
-Build the standalone package (includes desktop entry, scalable icon, and Wayland/X11/OpenGL runtime wrapper):
+Build from a local checkout:
 
 ```bash
 nix build
 ./result/bin/missnix
 ```
 
-Enter a development shell with `rustc`, `cargo`, `clippy`, `rustfmt`, `rust-analyzer`, `slint-lsp`, and GUI libraries configured:
+Add to a NixOS or Home Manager flake configuration:
+
+```nix
+{
+  inputs.missnix.url = "github:Irgendeinwer/MissNix";
+
+  # In NixOS / Home Manager modules:
+  environment.systemPackages = [ inputs.missnix.packages.${pkgs.system}.default ];
+}
+```
+
+### Prebuilt Release Archives
+
+Download the latest archive from [**Releases**](https://github.com/Irgendeinwer/MissNix/releases) and optionally verify its cryptographic SLSA build provenance with the GitHub CLI:
 
 ```bash
-nix develop
-cargo test --workspace
-cargo run
+gh attestation verify missnix-v*-x86_64-unknown-linux-gnu.tar.gz --repo Irgendeinwer/MissNix
+sha256sum -c SHA256SUMS
+```
+
+### Cargo (From Source)
+
+Requires Rust 1.85+ and standard Wayland/X11/OpenGL development headers (or `nix develop`):
+
+```bash
+cargo run --release
 ```
 
 ---
 
-## Headless CLI Mode (Optional)
+## Headless CLI & `systemd` Timer
 
-While MissNix launches its desktop GUI by default, it also supports headless flags for scripting or `systemd --user` timers:
+```text
+USAGE:
+  missnix [OPTIONS]
 
-```bash
-# Add & scan a music directory, check for new releases, and print summary counts
-missnix --scan ~/Music --check --status
-
-# Use a custom SQLite database path
-missnix --db /path/to/custom.db
+OPTIONS:
+  --db <FILE>       Override SQLite database file path
+  --scale <PCT>     Set HiDPI UI scale percentage (75..250, e.g. 125 or 150)
+  --scan <FOLDER>   Add & scan a local music folder headlessly
+  --check           Check Deezer + MusicBrainz for new releases headlessly
+  --status          Print tracked artist & unread release counts
+  -h, --help        Print help information
+  -V, --version     Print version
 ```
+
+Example background check via `systemd --user`:
+
+```ini
+# ~/.config/systemd/user/missnix-check.service
+[Unit]
+Description=Check local music artists for new releases (MissNix)
+
+[Service]
+Type=oneshot
+ExecStart=%h/.nix-profile/bin/missnix --check --status
+```
+
+---
+
+## Keyboard Shortcuts
+
+| Shortcut | Action |
+| :--- | :--- |
+| `/` | Focus search bar in Release Radar or Tracked Artists |
+| `Space` | Play / pause active 30-second track preview |
+| `Esc` | Close right inspector drawer or Add Artist panel |
+| `Ctrl + R` | Trigger release check across tracked artists |
+| `Ctrl + =` / `Ctrl + -` | Increase / decrease HiDPI interface scale |
+| `Ctrl + 0` | Reset interface scale to `100%` |
+
+---
+
+## Data & Cache Locations
+
+| Path | Purpose |
+| :--- | :--- |
+| `$XDG_DATA_HOME/missnix/missnix.db` | SQLite WAL database (artists, local albums, releases, settings) |
+| `$XDG_CACHE_HOME/missnix/covers/` | Cached release cover artwork |
+| `$XDG_CACHE_HOME/missnix/avatars/` | Cached artist portraits |
+| `$XDG_CACHE_HOME/missnix/previews/` | Cached 30-second MP3 track previews |
+
+---
+
+## Creating a Release
+
+Releases are built, attested (SLSA provenance + `SHA256SUMS`), and published automatically by [`.github/workflows/release.yml`](.github/workflows/release.yml). Published tags are **immutable** (existing releases are never overwritten; enable *Settings → General → Releases → Enable release immutability* in GitHub for server-side enforcement).
+
+To cut a new release (e.g. `v0.2.0`):
+
+1. Update `version = "0.2.0"` in both `Cargo.toml` and `crates/missnix-core/Cargo.toml` (`flake.nix` reads `Cargo.toml` automatically) and run `cargo check` so `Cargo.lock` updates.
+2. Commit with a `release: vX.Y.Z` subject on `main` and push:
+   ```bash
+   git commit -am "release: v0.2.0"
+   git push origin main
+   ```
+   *(Alternatively, push a `v0.2.0` git tag directly or trigger the **Release** workflow manually via `workflow_dispatch` in GitHub Actions.)*
+
+---
+
+## License
+
+Released under the [MIT License](LICENSE).

@@ -52,8 +52,8 @@ export {
 
 export component AppWindow inherits Window {
     title: "MissNix — Local Music Release Radar";
-    min-width: 1020px;
-    min-height: 660px;
+    min-width: 980px;
+    min-height: 640px;
     preferred-width: 1400px;
     preferred-height: 880px;
     background: Theme.surface;
@@ -61,7 +61,7 @@ export component AppWindow inherits Window {
     // -------------------------------------------------------------------------
     // Navigation & Global State
     // -------------------------------------------------------------------------
-    // 0 = Release Radar (Unread), 1 = All Releases, 2 = Tracked Artists, 3 = Library & Settings
+    // 0 = Release Radar, 1 = Tracked Artists, 2 = Library & Settings
     in-out property <int> active-view: 0;
     in property <int> unseen-badge-count: 0;
     in property <string> library-summary-text: "0 tracked artists · 0 local albums";
@@ -97,19 +97,25 @@ export component AppWindow inherits Window {
     in-out property <int> preview-volume-pct: 80;
 
     // -------------------------------------------------------------------------
-    // Release Feed State
+    // Unified Release Radar Feed State
     // -------------------------------------------------------------------------
     in property <[ReleaseCardData]> releases: [];
     in-out property <string> feed-search-text: "";
-    in-out property <int> feed-type-index: 0;       // 0 All, 1 Albums, 2 EPs, 3 Singles
+    in-out property <int> feed-status-index: 0;     // 0 All, 1 Unread, 2 Upcoming
+    in-out property <int> feed-type-index: 0;       // 0 All Types, 1 Albums, 2 EPs, 3 Singles
     in-out property <int> feed-sort-index: 0;       // 0 Newest, 1 Upcoming, 2 Artist A-Z
     in-out property <bool> feed-hide-owned: true;
     in property <int> filtered-artist-id: 0;
     in property <string> filtered-artist-name: "";
+    in property <string> filtered-artist-status: "tracked";
+
+    // Unified Right Inspector Mode: 0 = Closed, 1 = Release Details, 2 = Artist Details
+    in-out property <int> inspector-mode: 0;
 
     // Selected Release Inspector State
     in property <int> selected-release-id: 0;
     in property <ReleaseCardData> selected-release;
+    in property <string> selected-release-artist-status: "tracked";
     in property <[TrackRowData]> selected-release-tracks: [];
     in property <bool> loading-tracks: false;
 
@@ -140,6 +146,7 @@ export component AppWindow inherits Window {
     in-out property <bool> pref-dark-mode: true;
     in-out property <int> pref-accent-preset: 0;    // 0..5
     in-out property <int> pref-grid-density: 1;     // 0=Compact, 1=Comfortable, 2=Spacious
+    in-out property <int> pref-ui-scale-pct: 100;   // 90, 100, 115, 125, 150, 175, 200
     in-out property <int> pref-discovery-mode: 0;   // 0=AlbumArtist+Folder, 1=FolderOnly, 2=AllTags+Folder
     in-out property <bool> pref-split-collaborations: true;
     in-out property <bool> pref-include-albums: true;
@@ -167,16 +174,16 @@ export component AppWindow inherits Window {
     callback set-preview-volume(int);
     callback stop-preview();
 
-    // Feed callbacks
+    // Feed & Inspector callbacks
     callback feed-filters-changed();
     callback clear-artist-feed-filter();
     callback select-release(int);
-    callback close-release-inspector();
+    callback close-inspector();
     callback toggle-release-seen(int);
     callback dismiss-release(int);
     callback mark-all-seen();
     callback open-external-url(string);
-    callback jump-to-artist(int);
+    callback inspect-artist(int);
 
     // Artists callbacks
     callback artist-filters-changed();
@@ -198,6 +205,7 @@ export component AppWindow inherits Window {
     callback preferences-changed();
     callback scan-preferences-changed();
     callback theme-toggled(bool);
+    callback ui-scale-changed(int);
 
     public function apply-theme(dark: bool, accent: int) {
         root.pref-dark-mode = dark;
@@ -215,12 +223,8 @@ export component AppWindow inherits Window {
     key-scope := FocusScope {
         key-pressed(event) => {
             if (event.text == Key.Escape) {
-                if ((root.active-view == 0 || root.active-view == 1) && root.selected-release-id > 0) {
-                    root.close-release-inspector();
-                    return accept;
-                }
-                if (root.active-view == 2 && root.selected-artist-id > 0) {
-                    root.select-artist(0);
+                if (root.inspector-mode != 0) {
+                    root.close-inspector();
                     return accept;
                 }
                 if (root.show-add-artist-bar) {
@@ -228,17 +232,33 @@ export component AppWindow inherits Window {
                     return accept;
                 }
             }
+            if (event.text == " " && root.preview-active) {
+                root.toggle-preview-pause();
+                return accept;
+            }
             if (event.modifiers.control && (event.text == "r" || event.text == "R")) {
                 if (!root.is-busy) {
                     root.check-all-releases();
                 }
                 return accept;
             }
-            if (event.text == "/" && (root.active-view == 0 || root.active-view == 1)) {
+            if (event.modifiers.control && (event.text == "=" || event.text == "+")) {
+                root.ui-scale-changed(min(200, root.pref-ui-scale-pct + 15));
+                return accept;
+            }
+            if (event.modifiers.control && event.text == "-") {
+                root.ui-scale-changed(max(90, root.pref-ui-scale-pct - 15));
+                return accept;
+            }
+            if (event.modifiers.control && event.text == "0") {
+                root.ui-scale-changed(100);
+                return accept;
+            }
+            if (event.text == "/" && root.active-view == 0) {
                 feed-search-input.focus-input();
                 return accept;
             }
-            if (event.text == "/" && root.active-view == 2) {
+            if (event.text == "/" && root.active-view == 1) {
                 artist-search-input.focus-input();
                 return accept;
             }
@@ -250,10 +270,10 @@ export component AppWindow inherits Window {
             height: 100%;
 
             // =====================================================================
-            // LEFT MATERIAL 3 NAVIGATION RAIL
+            // LEFT MATERIAL 3 NAVIGATION RAIL (3 Unified Destinations)
             // =====================================================================
             Rectangle {
-                width: 228px;
+                width: 224px;
                 horizontal-stretch: 0;
                 background: Theme.surface-rail;
 
@@ -292,10 +312,9 @@ export component AppWindow inherits Window {
 
                     // Primary Navigation Destinations with Animated Sliding Pill
                     Rectangle {
-                        height: 4 * 42px + 3 * 4px;
+                        height: 3 * 42px + 2 * 4px;
                         vertical-stretch: 0;
 
-                        // Smooth sliding left accent indicator bar
                         Rectangle {
                             x: 2px;
                             y: root.active-view * 46px + 11px;
@@ -319,24 +338,17 @@ export component AppWindow inherits Window {
                             }
 
                             NavRailItem {
-                                icon: @image-url("../assets/icons/disc.svg");
-                                label: "All Releases";
+                                icon: @image-url("../assets/icons/artists.svg");
+                                label: "Tracked Artists";
                                 active: root.active-view == 1;
                                 clicked => { root.navigate(1); }
                             }
 
                             NavRailItem {
-                                icon: @image-url("../assets/icons/artists.svg");
-                                label: "Tracked Artists";
-                                active: root.active-view == 2;
-                                clicked => { root.navigate(2); }
-                            }
-
-                            NavRailItem {
                                 icon: @image-url("../assets/icons/settings.svg");
                                 label: "Library & Settings";
-                                active: root.active-view == 3;
-                                clicked => { root.navigate(3); }
+                                active: root.active-view == 2;
+                                clicked => { root.navigate(2); }
                             }
                         }
                     }
@@ -468,15 +480,12 @@ export component AppWindow inherits Window {
                     clip: true;
 
                     // -------------------------------------------------------------
-                    // VIEW 0 & VIEW 1: RELEASE RADAR / ALL RELEASES
+                    // VIEW 0: UNIFIED RELEASE RADAR
                     // -------------------------------------------------------------
                     VerticalLayout {
-                        visible: root.active-view == 0 || root.active-view == 1;
-                        opacity: (root.active-view == 0 || root.active-view == 1) ? 1.0 : 0.0;
+                        visible: root.active-view == 0;
                         width: 100%;
                         height: 100%;
-
-                        animate opacity { duration: 150ms; }
 
                         // Top Desktop Filter Bar
                         Rectangle {
@@ -492,21 +501,19 @@ export component AppWindow inherits Window {
                                 alignment: start;
 
                                 HorizontalLayout {
-                                    spacing: 12px;
+                                    spacing: 10px;
 
                                     VerticalLayout {
                                         alignment: center;
                                         spacing: 2px;
                                         Text {
-                                            text: root.active-view == 0 ? "Release Radar" : "All Discovered Releases";
+                                            text: "Release Radar";
                                             font-size: 21px;
                                             font-weight: 800;
                                             color: Theme.on-surface;
                                         }
                                         Text {
-                                            text: root.active-view == 0
-                                                ? "Unread albums, EPs, and singles from your tracked artists"
-                                                : "Complete release timeline across new, upcoming, seen, and owned drops";
+                                            text: "New, upcoming, and catalog releases across your tracked artists";
                                             font-size: 12px;
                                             color: Theme.on-surface-variant;
                                         }
@@ -516,12 +523,36 @@ export component AppWindow inherits Window {
 
                                     if root.filtered-artist-id > 0 : HorizontalLayout {
                                         spacing: 6px;
+
                                         TonalBadge {
                                             y: (parent.height - self.height) / 2;
                                             label: "ARTIST: \{root.filtered-artist-name}";
                                             badge-bg: Theme.primary-container;
                                             badge-fg: Theme.on-primary-container;
                                         }
+
+                                        M3Button {
+                                            y: (parent.height - self.height) / 2;
+                                            compact: true;
+                                            variant: root.filtered-artist-status == "muted" ? "primary-tonal" : "outlined";
+                                            has-icon: true;
+                                            icon: root.filtered-artist-status == "muted"
+                                                ? @image-url("../assets/icons/volume-on.svg")
+                                                : @image-url("../assets/icons/volume-off.svg");
+                                            text: root.filtered-artist-status == "muted" ? "Unmute" : "Mute";
+                                            clicked => { root.toggle-artist-mute(root.filtered-artist-id); }
+                                        }
+
+                                        M3Button {
+                                            y: (parent.height - self.height) / 2;
+                                            compact: true;
+                                            variant: root.filtered-artist-status == "ignored" ? "primary-tonal" : "danger";
+                                            has-icon: true;
+                                            icon: @image-url("../assets/icons/eye-off.svg");
+                                            text: root.filtered-artist-status == "ignored" ? "Restore" : "Hide";
+                                            clicked => { root.toggle-artist-ignore(root.filtered-artist-id); }
+                                        }
+
                                         M3Button {
                                             y: (parent.height - self.height) / 2;
                                             compact: true;
@@ -550,13 +581,13 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
-                                // Responsive Filter Row (Search bounded to 360px + M3 Filter Chips + Sort)
+                                // Unified Filter Row (Search + Status Chips + Type Chips + Sort)
                                 HorizontalLayout {
-                                    spacing: 10px;
+                                    spacing: 8px;
 
                                     feed-search-input := M3SearchField {
-                                        min-width: 190px;
-                                        max-width: 360px;
+                                        min-width: 170px;
+                                        max-width: 290px;
                                         horizontal-stretch: 1;
                                         text <=> root.feed-search-text;
                                         placeholder: "Search artist or release...  (/)";
@@ -568,48 +599,82 @@ export component AppWindow inherits Window {
                                         horizontal-stretch: 0;
 
                                         HorizontalLayout {
-                                            spacing: 6px;
+                                            spacing: 5px;
                                             height: 32px;
 
                                             M3FilterChip {
                                                 label: "All";
-                                            selected: root.feed-type-index == 0;
-                                            clicked => {
-                                                root.feed-type-index = 0;
-                                                root.feed-filters-changed();
+                                                selected: root.feed-status-index == 0;
+                                                clicked => {
+                                                    root.feed-status-index = 0;
+                                                    root.feed-filters-changed();
+                                                }
                                             }
-                                        }
-                                        M3FilterChip {
-                                            label: "Albums";
-                                            selected: root.feed-type-index == 1;
-                                            clicked => {
-                                                root.feed-type-index = 1;
-                                                root.feed-filters-changed();
+                                            M3FilterChip {
+                                                label: root.unseen-badge-count > 0
+                                                    ? "Unread (\{root.unseen-badge-count})"
+                                                    : "Unread";
+                                                selected: root.feed-status-index == 1;
+                                                clicked => {
+                                                    root.feed-status-index = 1;
+                                                    root.feed-filters-changed();
+                                                }
                                             }
-                                        }
-                                        M3FilterChip {
-                                            label: "EPs";
-                                            selected: root.feed-type-index == 2;
-                                            clicked => {
-                                                root.feed-type-index = 2;
-                                                root.feed-filters-changed();
+                                            M3FilterChip {
+                                                label: "Upcoming";
+                                                selected: root.feed-status-index == 2;
+                                                clicked => {
+                                                    root.feed-status-index = 2;
+                                                    root.feed-filters-changed();
+                                                }
                                             }
-                                        }
-                                        M3FilterChip {
-                                            label: "Singles";
-                                            selected: root.feed-type-index == 3;
-                                            clicked => {
-                                                root.feed-type-index = 3;
-                                                root.feed-filters-changed();
+
+                                            Rectangle {
+                                                width: 1px;
+                                                height: 20px;
+                                                y: 6px;
+                                                background: Theme.outline-variant;
                                             }
-                                        }
+
+                                            M3FilterChip {
+                                                label: "All Types";
+                                                selected: root.feed-type-index == 0;
+                                                clicked => {
+                                                    root.feed-type-index = 0;
+                                                    root.feed-filters-changed();
+                                                }
+                                            }
+                                            M3FilterChip {
+                                                label: "Albums";
+                                                selected: root.feed-type-index == 1;
+                                                clicked => {
+                                                    root.feed-type-index = 1;
+                                                    root.feed-filters-changed();
+                                                }
+                                            }
+                                            M3FilterChip {
+                                                label: "EPs";
+                                                selected: root.feed-type-index == 2;
+                                                clicked => {
+                                                    root.feed-type-index = 2;
+                                                    root.feed-filters-changed();
+                                                }
+                                            }
+                                            M3FilterChip {
+                                                label: "Singles";
+                                                selected: root.feed-type-index == 3;
+                                                clicked => {
+                                                    root.feed-type-index = 3;
+                                                    root.feed-filters-changed();
+                                                }
+                                            }
                                         }
                                     }
 
                                     Rectangle { horizontal-stretch: 1; }
 
                                     ComboBox {
-                                        width: 162px;
+                                        width: 158px;
                                         height: 34px;
                                         y: (parent.height - self.height) / 2;
                                         model: ["Newest First", "Upcoming First", "Artist A–Z"];
@@ -647,270 +712,265 @@ export component AppWindow inherits Window {
                                     border-color: Theme.outline-variant;
 
                                     VerticalLayout {
-                                    padding: 28px;
-                                    spacing: 12px;
-                                    alignment: center;
-
-                                    HorizontalLayout {
+                                        padding: 28px;
+                                        spacing: 12px;
                                         alignment: center;
-                                        Rectangle {
-                                            width: 44px;
-                                            height: 44px;
-                                            border-radius: 22px;
-                                            background: Theme.primary-container;
 
-                                            Image {
-                                                width: 22px;
-                                                height: 22px;
-                                                x: 11px;
-                                                y: 11px;
-                                                source: @image-url("../assets/icons/sparkles.svg");
-                                                colorize: Theme.primary;
+                                        HorizontalLayout {
+                                            alignment: center;
+                                            Rectangle {
+                                                width: 44px;
+                                                height: 44px;
+                                                border-radius: 22px;
+                                                background: Theme.primary-container;
+
+                                                Image {
+                                                    width: 22px;
+                                                    height: 22px;
+                                                    x: 11px;
+                                                    y: 11px;
+                                                    source: @image-url("../assets/icons/sparkles.svg");
+                                                    colorize: Theme.primary;
+                                                }
                                             }
                                         }
-                                    }
 
-                                    Text {
-                                        text: root.library-folders.length == 0
-                                            ? "Connect Your Local Music Library"
-                                            : (root.active-view == 0
-                                                ? "You're All Caught Up"
-                                                : "No Matching Releases");
-                                        font-size: 18px;
-                                        font-weight: 700;
-                                        color: Theme.on-surface;
-                                        horizontal-alignment: center;
-                                    }
-
-                                    Text {
-                                        text: root.library-folders.length == 0
-                                            ? "Add one or more local music folders to automatically discover your artists and track new albums, EPs, and singles."
-                                            : (root.active-view == 0
-                                                ? "No unread drops match your current filters. Run a release check or browse your full timeline."
-                                                : "Try broadening your search, release type filter, or lookback window in Settings.");
-                                        font-size: 12px;
-                                        color: Theme.on-surface-variant;
-                                        horizontal-alignment: center;
-                                        wrap: word-wrap;
-                                    }
-
-                                    HorizontalLayout {
-                                        alignment: center;
-                                        spacing: 10px;
-
-                                        if root.library-folders.length == 0 : M3Button {
-                                            variant: "filled";
-                                            has-icon: true;
-                                            icon: @image-url("../assets/icons/folder-plus.svg");
-                                            text: "Add Music Folder";
-                                            clicked => { root.navigate(3); }
+                                        Text {
+                                            text: root.library-folders.length == 0
+                                                ? "Add one or more local music folders to automatically discover your artists and track new albums, EPs, and singles."
+                                                : "No releases match your active filters. Run a release check or broaden your status, type, or lookback filters.";
+                                            font-size: 12px;
+                                            color: Theme.on-surface-variant;
+                                            horizontal-alignment: center;
+                                            wrap: word-wrap;
                                         }
 
-                                        if root.library-folders.length > 0 : M3Button {
-                                            variant: "filled";
-                                            has-icon: true;
-                                            icon: @image-url("../assets/icons/refresh.svg");
-                                            text: "Check Releases Now";
-                                            enabled: !root.is-busy;
-                                            clicked => { root.check-all-releases(); }
-                                        }
+                                        HorizontalLayout {
+                                            alignment: center;
+                                            spacing: 10px;
 
-                                        if root.library-folders.length > 0 && root.active-view == 0 : M3Button {
-                                            variant: "tonal";
-                                            text: "Browse All Releases";
-                                            clicked => { root.navigate(1); }
+                                            if root.library-folders.length == 0 : M3Button {
+                                                variant: "filled";
+                                                has-icon: true;
+                                                icon: @image-url("../assets/icons/folder-plus.svg");
+                                                text: "Add Music Folder";
+                                                clicked => { root.navigate(2); }
+                                            }
+
+                                            if root.library-folders.length > 0 : M3Button {
+                                                variant: "filled";
+                                                has-icon: true;
+                                                icon: @image-url("../assets/icons/refresh.svg");
+                                                text: "Check Releases Now";
+                                                enabled: !root.is-busy;
+                                                clicked => { root.check-all-releases(); }
+                                            }
+
+                                            if root.library-folders.length > 0 && (root.feed-status-index != 0 || root.feed-type-index != 0 || root.feed-search-text != "") : M3Button {
+                                                variant: "tonal";
+                                                text: "Reset Filters";
+                                                clicked => {
+                                                    root.feed-status-index = 0;
+                                                    root.feed-type-index = 0;
+                                                    root.feed-search-text = "";
+                                                    root.feed-filters-changed();
+                                                }
+                                            }
                                         }
-                                    }
                                     }
                                 }
                             }
                         }
 
-                        // Responsive Multi-Column Cover-Art Grid (scales up to 8 cols & respects Grid Density)
+                        // Smooth Viewport-Culled Multi-Column Cover Grid (Zero Resize Jitter)
                         if root.releases.length > 0 : feed-scroll := ScrollView {
                             vertical-stretch: 1;
 
-                            property <length> target-cell: root.pref-grid-density == 0 ? 174px
+                            property <length> target-cell: root.pref-grid-density == 0 ? 170px
                                                          : root.pref-grid-density == 2 ? 236px
-                                                         : 204px;
-                            property <int> cols: max(2, min(8, Math.floor((self.visible-width - 28px) / self.target-cell)));
+                                                         : 200px;
                             property <length> gap: 14px;
                             property <length> pad: 20px;
-                            property <length> card-w: max(156px, min(268px, Math.floor(((self.visible-width - 2 * pad - (cols - 1) * gap) / cols) / 1px) * 1px));
-                            property <length> grid-total-w: cols * card-w + (cols - 1) * gap;
-                            property <length> left-origin: max(pad, (self.visible-width - grid-total-w) / 2);
-                            property <length> card-h: card-w + 76px;
-                            property <int> total-rows: Math.ceil(root.releases.length / cols);
+                            property <length> avail-w: max(320px, self.visible-width - 2 * self.pad);
+                            property <int> cols: max(2, min(10, Math.floor((self.avail-w + self.gap) / (self.target-cell + self.gap))));
+                            property <length> card-w: (self.avail-w - (self.cols - 1) * self.gap) / self.cols;
+                            property <length> card-h: self.card-w + 76px;
+                            property <int> total-rows: Math.ceil(root.releases.length / self.cols);
+                            property <length> scroll-top: -self.viewport-y;
 
                             content-width: self.visible-width;
-                            content-height: max(self.visible-height, pad * 2 + total-rows * card-h + max(0, total-rows - 1) * gap);
+                            content-height: max(self.visible-height, self.pad * 2 + self.total-rows * self.card-h + max(0, self.total-rows - 1) * self.gap);
 
-                            for item[idx] in root.releases : ReleaseCard {
-                                x: feed-scroll.left-origin + Math.mod(idx, feed-scroll.cols) * (feed-scroll.card-w + feed-scroll.gap);
-                                y: feed-scroll.pad + Math.floor(idx / feed-scroll.cols) * (feed-scroll.card-h + feed-scroll.gap);
+                            for item[idx] in root.releases : Rectangle {
+                                property <int> row-idx: Math.floor(idx / feed-scroll.cols);
+                                property <int> col-idx: Math.mod(idx, feed-scroll.cols);
+                                property <length> item-y: feed-scroll.pad + self.row-idx * (feed-scroll.card-h + feed-scroll.gap);
+                                property <bool> in-viewport:
+                                    (self.item-y + feed-scroll.card-h >= feed-scroll.scroll-top - feed-scroll.card-h)
+                                    && (self.item-y <= feed-scroll.scroll-top + feed-scroll.visible-height + feed-scroll.card-h);
+
+                                x: feed-scroll.pad + self.col-idx * (feed-scroll.card-w + feed-scroll.gap);
+                                y: self.item-y;
                                 width: feed-scroll.card-w;
                                 height: feed-scroll.card-h;
-                                data: item;
-                                selected: root.selected-release-id == item.id;
-                                playing-this-release: root.preview-active && root.preview-playing && root.preview-release-id == item.id;
 
-                                select-release(id) => { root.select-release(id); }
-                                toggle-seen(id) => { root.toggle-release-seen(id); }
-                                dismiss-release(id) => { root.dismiss-release(id); }
-                                open-artist(aid) => { root.jump-to-artist(aid); }
+                                if self.in-viewport : ReleaseCard {
+                                    width: 100%;
+                                    height: 100%;
+                                    data: item;
+                                    selected: root.inspector-mode == 1 && root.selected-release-id == item.id;
+                                    playing-this-release: root.preview-active && root.preview-playing && root.preview-release-id == item.id;
+
+                                    select-release(id) => { root.select-release(id); }
+                                    toggle-seen(id) => { root.toggle-release-seen(id); }
+                                    dismiss-release(id) => { root.dismiss-release(id); }
+                                    open-artist(aid) => { root.inspect-artist(aid); }
+                                }
                             }
                         }
                     }
 
                     // -------------------------------------------------------------
-                    // VIEW 2: TRACKED ARTISTS (BALANCED CENTERED LIST + DRAWER)
+                    // VIEW 1: TRACKED ARTISTS (BALANCED CENTERED LIST)
                     // -------------------------------------------------------------
                     HorizontalLayout {
-                        visible: root.active-view == 2;
-                        opacity: root.active-view == 2 ? 1.0 : 0.0;
+                        visible: root.active-view == 1;
                         width: 100%;
                         height: 100%;
+                        alignment: center;
 
-                        animate opacity { duration: 150ms; }
-
-                        // Responsive centered column container so wide windows don't stretch rows apart!
-                        HorizontalLayout {
+                        VerticalLayout {
+                            max-width: 1040px;
                             horizontal-stretch: 1;
                             height: 100%;
-                            alignment: center;
+                            padding-left: 20px;
+                            padding-right: 20px;
+                            padding-top: 16px;
+                            padding-bottom: 14px;
+                            spacing: 12px;
 
-                            VerticalLayout {
-                                max-width: 1040px;
-                                horizontal-stretch: 1;
-                                height: 100%;
-                                padding-left: 20px;
-                                padding-right: 20px;
-                                padding-top: 16px;
-                                padding-bottom: 14px;
+                            HorizontalLayout {
                                 spacing: 12px;
+                                vertical-stretch: 0;
 
-                                HorizontalLayout {
-                                    spacing: 12px;
-                                    vertical-stretch: 0;
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 2px;
+                                    Text {
+                                        text: "Tracked Artists";
+                                        font-size: 21px;
+                                        font-weight: 800;
+                                        color: Theme.on-surface;
+                                    }
+                                    Text {
+                                        text: "Primary artists discovered from your library — click any artist to inspect, mute, hide, or override IDs";
+                                        font-size: 12px;
+                                        color: Theme.on-surface-variant;
+                                    }
+                                }
 
-                                    VerticalLayout {
-                                        alignment: center;
-                                        spacing: 2px;
-                                        Text {
-                                            text: "Tracked Artists";
-                                            font-size: 21px;
-                                            font-weight: 800;
-                                            color: Theme.on-surface;
+                                Rectangle { horizontal-stretch: 1; }
+
+                                M3Button {
+                                    y: (parent.height - self.height) / 2;
+                                    variant: root.show-add-artist-bar ? "outlined" : "filled";
+                                    has-icon: true;
+                                    icon: root.show-add-artist-bar
+                                        ? @image-url("../assets/icons/close.svg")
+                                        : @image-url("../assets/icons/plus.svg");
+                                    text: root.show-add-artist-bar ? "Close" : "Add Artist";
+                                    clicked => {
+                                        root.show-add-artist-bar = !root.show-add-artist-bar;
+                                    }
+                                }
+                            }
+
+                            // Collapsible Manual Artist Search & Add Card
+                            if root.show-add-artist-bar : Rectangle {
+                                vertical-stretch: 0;
+                                border-radius: 14px;
+                                background: Theme.surface-container;
+                                border-width: 1px;
+                                border-color: Theme.primary.with-alpha(0.45);
+
+                                VerticalLayout {
+                                    padding: 14px;
+                                    spacing: 10px;
+                                    alignment: start;
+
+                                    HorizontalLayout {
+                                        spacing: 10px;
+
+                                        M3SearchField {
+                                            horizontal-stretch: 1;
+                                            text <=> root.manual-artist-query;
+                                            placeholder: "Search Deezer & MusicBrainz for an artist to track...";
+                                            accepted(val) => { root.search-external-artist(val); }
                                         }
+
+                                        M3Button {
+                                            y: (parent.height - self.height) / 2;
+                                            variant: "filled";
+                                            text: "Search Online";
+                                            enabled: root.manual-artist-query != "" && !root.searching-external-artists;
+                                            clicked => { root.search-external-artist(root.manual-artist-query); }
+                                        }
+
+                                        M3Button {
+                                            y: (parent.height - self.height) / 2;
+                                            variant: "tonal";
+                                            text: "Add by Name";
+                                            enabled: root.manual-artist-query != "";
+                                            clicked => { root.add-artist-by-name(root.manual-artist-query); }
+                                        }
+                                    }
+
+                                    if root.searching-external-artists : HorizontalLayout {
+                                        spacing: 8px;
+                                        Spinner { width: 16px; height: 16px; indeterminate: true; }
                                         Text {
-                                            text: "Clean primary artist list discovered from your library — click an artist to inspect or override IDs";
+                                            text: "Searching Deezer & MusicBrainz...";
                                             font-size: 12px;
                                             color: Theme.on-surface-variant;
+                                            vertical-alignment: center;
                                         }
                                     }
 
-                                    Rectangle { horizontal-stretch: 1; }
-
-                                    M3Button {
-                                        y: (parent.height - self.height) / 2;
-                                        variant: root.show-add-artist-bar ? "outlined" : "filled";
-                                        has-icon: true;
-                                        icon: root.show-add-artist-bar
-                                            ? @image-url("../assets/icons/close.svg")
-                                            : @image-url("../assets/icons/plus.svg");
-                                        text: root.show-add-artist-bar ? "Close" : "Add Artist";
-                                        clicked => {
-                                            root.show-add-artist-bar = !root.show-add-artist-bar;
-                                        }
-                                    }
-                                }
-
-                                // Collapsible Manual Artist Search & Add Card
-                                if root.show-add-artist-bar : Rectangle {
-                                    vertical-stretch: 0;
-                                    border-radius: 14px;
-                                    background: Theme.surface-container;
-                                    border-width: 1px;
-                                    border-color: Theme.primary.with-alpha(0.45);
-
-                                    VerticalLayout {
-                                        padding: 14px;
-                                        spacing: 10px;
+                                    if root.artist-search-candidates.length > 0 : VerticalLayout {
+                                        spacing: 6px;
                                         alignment: start;
-
-                                        HorizontalLayout {
-                                            spacing: 10px;
-
-                                            M3SearchField {
-                                                horizontal-stretch: 1;
-                                                text <=> root.manual-artist-query;
-                                                placeholder: "Search Deezer & MusicBrainz for an artist to track...";
-                                                accepted(val) => { root.search-external-artist(val); }
-                                            }
-
-                                            M3Button {
-                                                y: (parent.height - self.height) / 2;
-                                                variant: "filled";
-                                                text: "Search Online";
-                                                enabled: root.manual-artist-query != "" && !root.searching-external-artists;
-                                                clicked => { root.search-external-artist(root.manual-artist-query); }
-                                            }
-
-                                            M3Button {
-                                                y: (parent.height - self.height) / 2;
-                                                variant: "tonal";
-                                                text: "Add by Name";
-                                                enabled: root.manual-artist-query != "";
-                                                clicked => { root.add-artist-by-name(root.manual-artist-query); }
-                                            }
-                                        }
-
-                                        if root.searching-external-artists : HorizontalLayout {
-                                            spacing: 8px;
-                                            Spinner { width: 16px; height: 16px; indeterminate: true; }
-                                            Text {
-                                                text: "Searching Deezer & MusicBrainz...";
-                                                font-size: 12px;
-                                                color: Theme.on-surface-variant;
-                                                vertical-alignment: center;
-                                            }
-                                        }
-
-                                        if root.artist-search-candidates.length > 0 : VerticalLayout {
-                                            spacing: 6px;
-                                            alignment: start;
-                                            for cand in root.artist-search-candidates : SearchCandidateRow {
-                                                candidate: cand;
-                                                add-candidate(idx) => { root.add-search-candidate(idx); }
-                                            }
+                                        for cand in root.artist-search-candidates : SearchCandidateRow {
+                                            candidate: cand;
+                                            add-candidate(idx) => { root.add-search-candidate(idx); }
                                         }
                                     }
                                 }
+                            }
 
-                                // Artist Search & Material 3 Filter Chips
-                                HorizontalLayout {
-                                    spacing: 10px;
-                                    vertical-stretch: 0;
+                            // Artist Search & Material 3 Filter Chips
+                            HorizontalLayout {
+                                spacing: 10px;
+                                vertical-stretch: 0;
 
-                                    artist-search-input := M3SearchField {
-                                        min-width: 190px;
-                                        max-width: 340px;
-                                        horizontal-stretch: 1;
-                                        text <=> root.artist-search-text;
-                                        placeholder: "Filter artists by name...  (/)";
-                                        edited => { root.artist-filters-changed(); }
-                                    }
+                                artist-search-input := M3SearchField {
+                                    min-width: 190px;
+                                    max-width: 340px;
+                                    horizontal-stretch: 1;
+                                    text <=> root.artist-search-text;
+                                    placeholder: "Filter artists by name...  (/)";
+                                    edited => { root.artist-filters-changed(); }
+                                }
 
-                                    VerticalLayout {
-                                        alignment: center;
-                                        horizontal-stretch: 0;
+                                VerticalLayout {
+                                    alignment: center;
+                                    horizontal-stretch: 0;
 
-                                        HorizontalLayout {
-                                            spacing: 6px;
-                                            height: 32px;
+                                    HorizontalLayout {
+                                        spacing: 6px;
+                                        height: 32px;
 
-                                            M3FilterChip {
-                                                label: "All";
+                                        M3FilterChip {
+                                            label: "All";
                                             selected: root.artist-filter-index == 0;
                                             clicked => {
                                                 root.artist-filter-index = 0;
@@ -949,244 +1009,38 @@ export component AppWindow inherits Window {
                                                 root.artist-filters-changed();
                                             }
                                         }
-                                        }
-                                    }
-
-                                    Rectangle { horizontal-stretch: 1; }
-                                }
-
-                                if root.artists.length == 0 : Rectangle {
-                                    vertical-stretch: 1;
-                                    Text {
-                                        text: "No matching artists found. Scan your music folders or click 'Add Artist' above.";
-                                        font-size: 13px;
-                                        color: Theme.on-surface-muted;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
                                     }
                                 }
 
-                                if root.artists.length > 0 : ListView {
-                                    vertical-stretch: 1;
-                                    for art in root.artists : VerticalLayout {
-                                        padding-bottom: 6px;
-                                        ArtistListRow {
-                                            artist: art;
-                                            selected: root.selected-artist-id == art.id;
-                                            select-artist(id) => {
-                                                root.select-artist(root.selected-artist-id == id ? 0 : id);
-                                            }
-                                            view-drops(id) => { root.view-artist-releases(id); }
-                                            toggle-mute(id) => { root.toggle-artist-mute(id); }
-                                            toggle-ignore(id) => { root.toggle-artist-ignore(id); }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // Animated Right Artist Detail & Disambiguation Drawer
-                        Rectangle {
-                            width: root.selected-artist-id > 0 ? 368px : 0px;
-                            horizontal-stretch: 0;
-                            background: Theme.surface-rail;
-                            clip: true;
-
-                            animate width { duration: 190ms; easing: cubic-bezier(0.2, 0.0, 0.0, 1.0); }
-
-                            Rectangle {
-                                x: 0px;
-                                width: 1px;
-                                height: 100%;
-                                background: Theme.outline-variant;
+                                Rectangle { horizontal-stretch: 1; }
                             }
 
-                            if root.selected-artist-id > 0 : ScrollView {
-                                width: 368px;
-                                height: 100%;
+                            if root.artists.length == 0 : Rectangle {
+                                vertical-stretch: 1;
+                                Text {
+                                    text: "No matching artists found. Scan your music folders or click 'Add Artist' above.";
+                                    font-size: 13px;
+                                    color: Theme.on-surface-muted;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+                            }
 
-                                VerticalLayout {
-                                    padding: 18px;
-                                    spacing: 14px;
-                                    alignment: start;
-
-                                    // Drawer Header (Fixed Icon Close Button — Never Stretches!)
-                                    HorizontalLayout {
-                                        spacing: 12px;
-                                        vertical-stretch: 0;
-
-                                        ArtistAvatar {
-                                            size: 48px;
-                                            y: (parent.height - self.height) / 2;
-                                            avatar: root.selected-artist.avatar;
-                                            has-avatar: root.selected-artist.has-avatar;
-                                            monogram: root.selected-artist.monogram;
-                                            accent-hue: root.selected-artist.accent-hue;
-                                        }
-
-                                        VerticalLayout {
-                                            alignment: center;
-                                            spacing: 3px;
-                                            horizontal-stretch: 1;
-
-                                            Text {
-                                                text: root.selected-artist.name;
-                                                font-size: 17px;
-                                                font-weight: 800;
-                                                color: Theme.on-surface;
-                                                overflow: elide;
-                                            }
-
-                                            TonalBadge {
-                                                label: root.selected-artist.status == "tracked" ? "TRACKED"
-                                                     : root.selected-artist.status == "muted" ? "MUTED"
-                                                     : "IGNORED";
-                                                badge-bg: root.selected-artist.status == "tracked" ? Theme.primary-container
-                                                        : root.selected-artist.status == "muted" ? Theme.warning-container
-                                                        : Theme.error-container;
-                                                badge-fg: root.selected-artist.status == "tracked" ? Theme.on-primary-container
-                                                        : root.selected-artist.status == "muted" ? Theme.on-warning-container
-                                                        : Theme.on-error-container;
-                                            }
-                                        }
-
-                                        M3IconButton {
-                                            y: (parent.height - self.height) / 2;
-                                            size: 34px;
-                                            icon-size: 16px;
-                                            icon: @image-url("../assets/icons/close.svg");
-                                            clicked => { root.select-artist(0); }
-                                        }
-                                    }
-
-                                    if root.selected-artist.disambiguation != "" : Text {
-                                        text: root.selected-artist.disambiguation;
-                                        font-size: 12px;
-                                        color: Theme.on-surface-variant;
-                                        wrap: word-wrap;
-                                    }
-
-                                    Text {
-                                        text: "\{root.selected-artist.source-label} · \{root.selected-artist.release-count} releases found";
-                                        font-size: 12px;
-                                        color: Theme.on-surface-muted;
-                                        wrap: word-wrap;
-                                    }
-
-                                    // Bounded Action Row
-                                    HorizontalLayout {
-                                        spacing: 8px;
-                                        vertical-stretch: 0;
-
-                                        M3Button {
-                                            fill-width: true;
-                                            variant: "filled";
-                                            has-icon: true;
-                                            icon: @image-url("../assets/icons/refresh.svg");
-                                            text: "Check Now";
-                                            enabled: !root.is-busy;
-                                            clicked => { root.check-single-artist(root.selected-artist.id); }
-                                        }
-
-                                        M3Button {
-                                            fill-width: true;
-                                            variant: "tonal";
-                                            has-icon: true;
-                                            icon: @image-url("../assets/icons/disc.svg");
-                                            text: "View Drops";
-                                            clicked => { root.view-artist-releases(root.selected-artist.id); }
-                                        }
-                                    }
-
-                                    if root.selected-artist.external-url != "" : M3Button {
-                                        fill-width: true;
-                                        variant: "outlined";
-                                        has-icon: true;
-                                        icon: @image-url("../assets/icons/external.svg");
-                                        text: "Open Artist Page";
-                                        clicked => { root.open-external-url(root.selected-artist.external-url); }
-                                    }
-
-                                    if root.selected-artist.is-manual : M3Button {
-                                        fill-width: true;
-                                        variant: "danger";
-                                        has-icon: true;
-                                        icon: @image-url("../assets/icons/trash.svg");
-                                        text: "Delete Manual Artist";
-                                        clicked => { root.delete-artist(root.selected-artist.id); }
-                                    }
-
-                                    Rectangle {
-                                        height: 1px;
-                                        vertical-stretch: 0;
-                                        background: Theme.outline-variant;
-                                    }
-
-                                    VerticalLayout {
-                                        spacing: 3px;
-                                        vertical-stretch: 0;
-                                        Text {
-                                            text: "Provider Identity Link";
-                                            font-size: 13px;
-                                            font-weight: 700;
-                                            color: Theme.on-surface;
-                                        }
-                                        Text {
-                                            text: "Auto-matched via tags & local albums. Override if two artists share the same name:";
-                                            font-size: 11px;
-                                            color: Theme.on-surface-muted;
-                                            wrap: word-wrap;
-                                        }
-                                    }
-
-                                    M3LabeledInput {
-                                        label: "Deezer Artist ID";
-                                        placeholder: "e.g. 9052";
-                                        text <=> root.edit-artist-deezer-id;
-                                    }
-
-                                    M3LabeledInput {
-                                        label: "MusicBrainz Artist MBID";
-                                        placeholder: "UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)";
-                                        text <=> root.edit-artist-mbid;
-                                    }
-
-                                    M3Button {
-                                        fill-width: true;
-                                        variant: "primary-tonal";
-                                        has-icon: true;
-                                        icon: @image-url("../assets/icons/check.svg");
-                                        text: "Save Provider IDs";
-                                        clicked => {
-                                            root.save-artist-provider-ids(
-                                                root.selected-artist.id,
-                                                root.edit-artist-mbid,
-                                                root.edit-artist-deezer-id
+                            if root.artists.length > 0 : ListView {
+                                vertical-stretch: 1;
+                                for art in root.artists : VerticalLayout {
+                                    padding-bottom: 6px;
+                                    ArtistListRow {
+                                        artist: art;
+                                        selected: root.inspector-mode == 2 && root.selected-artist-id == art.id;
+                                        select-artist(id) => {
+                                            root.select-artist(
+                                                (root.inspector-mode == 2 && root.selected-artist-id == id) ? 0 : id
                                             );
                                         }
-                                    }
-
-                                    Rectangle {
-                                        height: 1px;
-                                        vertical-stretch: 0;
-                                        background: Theme.outline-variant;
-                                    }
-
-                                    Text {
-                                        text: "Local Library Albums (\{root.selected-artist-local-albums.length})";
-                                        font-size: 13px;
-                                        font-weight: 700;
-                                        color: Theme.on-surface;
-                                    }
-
-                                    if root.selected-artist-local-albums.length == 0 : Text {
-                                        text: "No local albums indexed for this artist.";
-                                        font-size: 11.5px;
-                                        color: Theme.on-surface-muted;
-                                    }
-
-                                    for alb in root.selected-artist-local-albums : LocalAlbumItem {
-                                        album: alb;
+                                        view-drops(id) => { root.view-artist-releases(id); }
+                                        toggle-mute(id) => { root.toggle-artist-mute(id); }
+                                        toggle-ignore(id) => { root.toggle-artist-ignore(id); }
                                     }
                                 }
                             }
@@ -1194,20 +1048,21 @@ export component AppWindow inherits Window {
                     }
 
                     // -------------------------------------------------------------
-                    // VIEW 3: LIBRARY & CUSTOMIZATION SETTINGS
+                    // VIEW 2: LIBRARY & CUSTOMIZATION SETTINGS
                     // -------------------------------------------------------------
-                    if root.active-view == 3 : ScrollView {
+                    if root.active-view == 2 : settings-scroll := ScrollView {
                         width: 100%;
                         height: 100%;
 
                         HorizontalLayout {
+                            width: settings-scroll.visible-width;
                             padding-top: 22px;
                             padding-bottom: 28px;
                             padding-left: 22px;
                             padding-right: 22px;
                             alignment: center;
 
-                            settings-col := VerticalLayout {
+                            VerticalLayout {
                                 max-width: 900px;
                                 horizontal-stretch: 1;
                                 spacing: 16px;
@@ -1223,16 +1078,16 @@ export component AppWindow inherits Window {
                                         color: Theme.on-surface;
                                     }
                                     Text {
-                                        text: "Customize Material 3 appearance, local folder & artist tag scanning rules, smart deduplication, and release sources";
+                                        text: "Customize Material 3 appearance, HiDPI interface scaling, artist discovery rules, and release sources";
                                         font-size: 12px;
                                         color: Theme.on-surface-variant;
                                     }
                                 }
 
-                                // Card 1: Appearance & Customization
+                                // Card 1: Appearance, HiDPI Scaling & Desktop Layout
                                 SectionCard {
-                                    title: "Appearance & Desktop Layout";
-                                    subtitle: "Personalize MissNix's Material 3 accent palette, dark/light surface scheme, and cover-art grid density.";
+                                    title: "Appearance, HiDPI Scaling & Layout";
+                                    subtitle: "Personalize MissNix's Material 3 accent palette, dark/light surface scheme, UI scale factor, and cover-art grid density.";
 
                                     Switch {
                                         text: "Dark Material 3 Surface Theme";
@@ -1315,8 +1170,71 @@ export component AppWindow inherits Window {
                                         }
                                     }
 
+                                    // HiDPI UI Scaling Selector
+                                    VerticalLayout {
+                                        spacing: 6px;
+                                        alignment: start;
+
+                                        HorizontalLayout {
+                                            spacing: 10px;
+                                            alignment: start;
+
+                                            Text {
+                                                text: "Interface Scale (HiDPI):";
+                                                font-size: 12.5px;
+                                                font-weight: 600;
+                                                color: Theme.on-surface;
+                                                vertical-alignment: center;
+                                                width: 190px;
+                                            }
+
+                                            M3FilterChip {
+                                                label: "90%";
+                                                selected: root.pref-ui-scale-pct == 90;
+                                                clicked => { root.ui-scale-changed(90); }
+                                            }
+                                            M3FilterChip {
+                                                label: "100%";
+                                                selected: root.pref-ui-scale-pct == 100;
+                                                clicked => { root.ui-scale-changed(100); }
+                                            }
+                                            M3FilterChip {
+                                                label: "115%";
+                                                selected: root.pref-ui-scale-pct == 115;
+                                                clicked => { root.ui-scale-changed(115); }
+                                            }
+                                            M3FilterChip {
+                                                label: "125%";
+                                                selected: root.pref-ui-scale-pct == 125;
+                                                clicked => { root.ui-scale-changed(125); }
+                                            }
+                                            M3FilterChip {
+                                                label: "150%";
+                                                selected: root.pref-ui-scale-pct == 150;
+                                                clicked => { root.ui-scale-changed(150); }
+                                            }
+                                            M3FilterChip {
+                                                label: "175%";
+                                                selected: root.pref-ui-scale-pct == 175;
+                                                clicked => { root.ui-scale-changed(175); }
+                                            }
+                                            M3FilterChip {
+                                                label: "200%";
+                                                selected: root.pref-ui-scale-pct == 200;
+                                                clicked => { root.ui-scale-changed(200); }
+                                            }
+                                        }
+
+                                        Text {
+                                            text: "Active scale: \{root.pref-ui-scale-pct}%  ·  Shortcuts: Ctrl + / Ctrl - / Ctrl 0 (ideal for high-DPI monitors without compositor scaling)";
+                                            font-size: 11px;
+                                            color: Theme.on-surface-muted;
+                                            wrap: word-wrap;
+                                        }
+                                    }
+
                                     HorizontalLayout {
-                                        spacing: 12px;
+                                        spacing: 10px;
                                         alignment: start;
 
                                         Text {
@@ -1406,7 +1324,6 @@ export component AppWindow inherits Window {
                                         background: Theme.outline-variant;
                                     }
 
-                                    // Artist Discovery Source Mode Selector
                                     VerticalLayout {
                                         spacing: 8px;
                                         alignment: start;
@@ -1654,8 +1571,8 @@ export component AppWindow inherits Window {
                     stop-preview => { root.stop-preview(); }
                     open-playing-release => {
                         if (root.preview-release-id > 0) {
-                            if (root.active-view != 0 && root.active-view != 1) {
-                                root.navigate(1);
+                            if (root.active-view != 0) {
+                                root.navigate(0);
                             }
                             root.select-release(root.preview-release-id);
                         }
@@ -1664,10 +1581,13 @@ export component AppWindow inherits Window {
             }
 
             // =====================================================================
-            // ANIMATED RIGHT RELEASE DETAIL INSPECTOR DRAWER
+            // UNIFIED FULL-WIDTH RIGHT INSPECTOR DRAWER (RELEASE OR ARTIST)
             // =====================================================================
             Rectangle {
-                property <bool> drawer-open: (root.active-view == 0 || root.active-view == 1) && root.selected-release-id > 0;
+                property <bool> drawer-open:
+                    (root.active-view == 0 || root.active-view == 1)
+                    && ((root.inspector-mode == 1 && root.selected-release-id > 0)
+                        || (root.inspector-mode == 2 && root.selected-artist-id > 0));
                 width: self.drawer-open ? 386px : 0px;
                 horizontal-stretch: 0;
                 background: Theme.surface-rail;
@@ -1682,14 +1602,18 @@ export component AppWindow inherits Window {
                     background: Theme.outline-variant;
                 }
 
-                if self.drawer-open : VerticalLayout {
+                // -----------------------------------------------------------------
+                // MODE 1: RELEASE DETAILS INSPECTOR (with Quick Artist Mute/Hide)
+                // -----------------------------------------------------------------
+                if self.drawer-open && root.inspector-mode == 1 : VerticalLayout {
                     width: 386px;
                     height: 100%;
                     padding: 18px;
                     spacing: 12px;
 
-                    // Inspector Header
+                    // Full-Width Sticky Header
                     HorizontalLayout {
+                        width: 100%;
                         spacing: 8px;
                         vertical-stretch: 0;
                         Text {
@@ -1704,14 +1628,15 @@ export component AppWindow inherits Window {
                             size: 32px;
                             icon-size: 15px;
                             icon: @image-url("../assets/icons/close.svg");
-                            clicked => { root.close-release-inspector(); }
+                            clicked => { root.close-inspector(); }
                         }
                     }
 
-                    ScrollView {
+                    rel-scroll := ScrollView {
                         vertical-stretch: 1;
 
                         VerticalLayout {
+                            width: rel-scroll.visible-width;
                             padding-right: 4px;
                             spacing: 12px;
                             alignment: start;
@@ -1720,8 +1645,8 @@ export component AppWindow inherits Window {
                             HorizontalLayout {
                                 alignment: center;
                                 CoverArtwork {
-                                    width: 228px;
-                                    height: 228px;
+                                    width: 224px;
+                                    height: 224px;
                                     cover: root.selected-release.cover;
                                     has-cover: root.selected-release.has-cover;
                                     monogram: root.selected-release.monogram;
@@ -1763,7 +1688,7 @@ export component AppWindow inherits Window {
                                 }
                             }
 
-                            // Title, Artist & Release Date
+                            // Title, Clickable Artist & Release Date
                             VerticalLayout {
                                 spacing: 4px;
                                 alignment: start;
@@ -1793,7 +1718,7 @@ export component AppWindow inherits Window {
                                     }
                                     insp-artist-touch := TouchArea {
                                         mouse-cursor: pointer;
-                                        clicked => { root.jump-to-artist(root.selected-release.artist-id); }
+                                        clicked => { root.inspect-artist(root.selected-release.artist-id); }
                                     }
                                 }
 
@@ -1806,7 +1731,7 @@ export component AppWindow inherits Window {
                                 }
                             }
 
-                            // Bounded Action Buttons
+                            // Release Actions (Seen / Dismiss)
                             HorizontalLayout {
                                 spacing: 8px;
                                 vertical-stretch: 0;
@@ -1826,6 +1751,34 @@ export component AppWindow inherits Window {
                                     icon: @image-url("../assets/icons/eye-off.svg");
                                     text: "Dismiss";
                                     clicked => { root.dismiss-release(root.selected-release.id); }
+                                }
+                            }
+
+                            // Quick Artist Triage Row directly inside Release Details
+                            HorizontalLayout {
+                                spacing: 6px;
+                                vertical-stretch: 0;
+
+                                M3Button {
+                                    fill-width: true;
+                                    compact: true;
+                                    variant: root.selected-release-artist-status == "muted" ? "primary-tonal" : "outlined";
+                                    has-icon: true;
+                                    icon: root.selected-release-artist-status == "muted"
+                                        ? @image-url("../assets/icons/volume-on.svg")
+                                        : @image-url("../assets/icons/volume-off.svg");
+                                    text: root.selected-release-artist-status == "muted" ? "Unmute Artist" : "Mute Artist";
+                                    clicked => { root.toggle-artist-mute(root.selected-release.artist-id); }
+                                }
+
+                                M3Button {
+                                    fill-width: true;
+                                    compact: true;
+                                    variant: root.selected-release-artist-status == "ignored" ? "primary-tonal" : "danger";
+                                    has-icon: true;
+                                    icon: @image-url("../assets/icons/eye-off.svg");
+                                    text: root.selected-release-artist-status == "ignored" ? "Restore Artist" : "Hide Artist";
+                                    clicked => { root.toggle-artist-ignore(root.selected-release.artist-id); }
                                 }
                             }
 
@@ -1915,6 +1868,238 @@ export component AppWindow inherits Window {
                                         clicked-trk.track-number
                                     );
                                 }
+                            }
+                        }
+                    }
+                }
+
+                // -----------------------------------------------------------------
+                // MODE 2: ARTIST INSPECTOR (Full-Width Sticky Header + Mute/Hide)
+                // -----------------------------------------------------------------
+                if self.drawer-open && root.inspector-mode == 2 : VerticalLayout {
+                    width: 386px;
+                    height: 100%;
+                    padding: 18px;
+                    spacing: 12px;
+
+                    // Full-Width Sticky Header (Uses 100% of the 386px Panel!)
+                    HorizontalLayout {
+                        width: 100%;
+                        spacing: 12px;
+                        vertical-stretch: 0;
+
+                        ArtistAvatar {
+                            size: 46px;
+                            y: (parent.height - self.height) / 2;
+                            avatar: root.selected-artist.avatar;
+                            has-avatar: root.selected-artist.has-avatar;
+                            monogram: root.selected-artist.monogram;
+                            accent-hue: root.selected-artist.accent-hue;
+                        }
+
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 4px;
+                            horizontal-stretch: 1;
+
+                            Text {
+                                text: root.selected-artist.name;
+                                font-size: 17px;
+                                font-weight: 800;
+                                color: Theme.on-surface;
+                                overflow: elide;
+                            }
+
+                            HorizontalLayout {
+                                spacing: 6px;
+                                alignment: start;
+
+                                TonalBadge {
+                                    label: root.selected-artist.status == "tracked" ? "TRACKED"
+                                         : root.selected-artist.status == "muted" ? "MUTED"
+                                         : "HIDDEN";
+                                    badge-bg: root.selected-artist.status == "tracked" ? Theme.primary-container
+                                            : root.selected-artist.status == "muted" ? Theme.warning-container
+                                            : Theme.error-container;
+                                    badge-fg: root.selected-artist.status == "tracked" ? Theme.on-primary-container
+                                            : root.selected-artist.status == "muted" ? Theme.on-warning-container
+                                            : Theme.on-error-container;
+                                }
+                            }
+                        }
+
+                        M3IconButton {
+                            y: (parent.height - self.height) / 2;
+                            size: 32px;
+                            icon-size: 15px;
+                            icon: @image-url("../assets/icons/close.svg");
+                            clicked => { root.close-inspector(); }
+                        }
+                    }
+
+                    art-scroll := ScrollView {
+                        vertical-stretch: 1;
+
+                        VerticalLayout {
+                            width: art-scroll.visible-width;
+                            padding-right: 4px;
+                            spacing: 13px;
+                            alignment: start;
+
+                            if root.selected-artist.disambiguation != "" : Text {
+                                text: root.selected-artist.disambiguation;
+                                font-size: 12px;
+                                color: Theme.on-surface-variant;
+                                wrap: word-wrap;
+                            }
+
+                            Text {
+                                text: "\{root.selected-artist.source-label} · \{root.selected-artist.release-count} releases found";
+                                font-size: 12px;
+                                color: Theme.on-surface-muted;
+                                wrap: word-wrap;
+                            }
+
+                            // Prominent Quick Mute / Hide Artist Row
+                            HorizontalLayout {
+                                spacing: 8px;
+                                vertical-stretch: 0;
+
+                                M3Button {
+                                    fill-width: true;
+                                    variant: root.selected-artist.status == "muted" ? "primary-tonal" : "outlined";
+                                    has-icon: true;
+                                    icon: root.selected-artist.status == "muted"
+                                        ? @image-url("../assets/icons/volume-on.svg")
+                                        : @image-url("../assets/icons/volume-off.svg");
+                                    text: root.selected-artist.status == "muted" ? "Unmute Artist" : "Mute Artist";
+                                    clicked => { root.toggle-artist-mute(root.selected-artist.id); }
+                                }
+
+                                M3Button {
+                                    fill-width: true;
+                                    variant: root.selected-artist.status == "ignored" ? "primary-tonal" : "danger";
+                                    has-icon: true;
+                                    icon: @image-url("../assets/icons/eye-off.svg");
+                                    text: root.selected-artist.status == "ignored" ? "Restore Artist" : "Hide Artist";
+                                    clicked => { root.toggle-artist-ignore(root.selected-artist.id); }
+                                }
+                            }
+
+                            // Secondary Actions (Check Now / Filter Radar)
+                            HorizontalLayout {
+                                spacing: 8px;
+                                vertical-stretch: 0;
+
+                                M3Button {
+                                    fill-width: true;
+                                    variant: "filled";
+                                    has-icon: true;
+                                    icon: @image-url("../assets/icons/refresh.svg");
+                                    text: "Check Now";
+                                    enabled: !root.is-busy;
+                                    clicked => { root.check-single-artist(root.selected-artist.id); }
+                                }
+
+                                M3Button {
+                                    fill-width: true;
+                                    variant: "tonal";
+                                    has-icon: true;
+                                    icon: @image-url("../assets/icons/radar.svg");
+                                    text: "Filter Radar";
+                                    clicked => { root.view-artist-releases(root.selected-artist.id); }
+                                }
+                            }
+
+                            if root.selected-artist.external-url != "" : M3Button {
+                                fill-width: true;
+                                variant: "outlined";
+                                has-icon: true;
+                                icon: @image-url("../assets/icons/external.svg");
+                                text: "Open Artist Page";
+                                clicked => { root.open-external-url(root.selected-artist.external-url); }
+                            }
+
+                            if root.selected-artist.is-manual : M3Button {
+                                fill-width: true;
+                                variant: "danger";
+                                has-icon: true;
+                                icon: @image-url("../assets/icons/trash.svg");
+                                text: "Delete Manual Artist";
+                                clicked => { root.delete-artist(root.selected-artist.id); }
+                            }
+
+                            Rectangle {
+                                height: 1px;
+                                vertical-stretch: 0;
+                                background: Theme.outline-variant;
+                            }
+
+                            VerticalLayout {
+                                spacing: 3px;
+                                vertical-stretch: 0;
+                                Text {
+                                    text: "Provider Identity Link";
+                                    font-size: 13px;
+                                    font-weight: 700;
+                                    color: Theme.on-surface;
+                                }
+                                Text {
+                                    text: "Auto-matched via tags & local albums. Override if two artists share the same name:";
+                                    font-size: 11px;
+                                    color: Theme.on-surface-muted;
+                                    wrap: word-wrap;
+                                }
+                            }
+
+                            M3LabeledInput {
+                                label: "Deezer Artist ID";
+                                placeholder: "e.g. 9052";
+                                text <=> root.edit-artist-deezer-id;
+                            }
+
+                            M3LabeledInput {
+                                label: "MusicBrainz Artist MBID";
+                                placeholder: "UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)";
+                                text <=> root.edit-artist-mbid;
+                            }
+
+                            M3Button {
+                                fill-width: true;
+                                variant: "primary-tonal";
+                                has-icon: true;
+                                icon: @image-url("../assets/icons/check.svg");
+                                text: "Save Provider IDs";
+                                clicked => {
+                                    root.save-artist-provider-ids(
+                                        root.selected-artist.id,
+                                        root.edit-artist-mbid,
+                                        root.edit-artist-deezer-id
+                                    );
+                                }
+                            }
+
+                            Rectangle {
+                                height: 1px;
+                                vertical-stretch: 0;
+                                background: Theme.outline-variant;
+                            }
+
+                            Text {
+                                text: "Local Library Albums (\{root.selected-artist-local-albums.length})";
+                                font-size: 13px;
+                                font-weight: 700;
+                                color: Theme.on-surface;
+                            }
+
+                            if root.selected-artist-local-albums.length == 0 : Text {
+                                text: "No local albums indexed for this artist.";
+                                font-size: 11.5px;
+                                color: Theme.on-surface-muted;
+                            }
+
+                            for alb in root.selected-artist-local-albums : LocalAlbumItem {
+                                album: alb;
                             }
                         }
                     }

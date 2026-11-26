@@ -1,0 +1,229 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 560" width="980" height="560" role="img" aria-label="MissNix Desktop Interface Overview">
+  <defs>
+    <linearGradient id="winBg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#14131a"/>
+      <stop offset="100%" stop-color="#111016"/>
+    </linearGradient>
+    <linearGradient id="cov1" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#3a2a5e"/>
+      <stop offset="100%" stop-color="#1d3557"/>
+    </linearGradient>
+    <linearGradient id="cov2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#164e63"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <linearGradient id="cov3" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#065f46"/>
+      <stop offset="100%" stop-color="#1f2937"/>
+    </linearGradient>
+    <linearGradient id="cov4" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#581c4f"/>
+      <stop offset="100%" stop-color="#27223a"/>
+    </linearGradient>
+    <linearGradient id="cov5" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#78350f"/>
+      <stop offset="100%" stop-color="#1f2433"/>
+    </linearGradient>
+    <linearGradient id="cov6" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#312e81"/>
+      <stop offset="100%" stop-color="#134e4a"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Outer Window Frame -->
+  <rect x="4" y="4" width="972" height="552" rx="16" fill="url(#winBg)" stroke="#332f44" stroke-width="1.5"/>
+
+  <g font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
+    <!-- Left Navigation Rail -->
+    <rect x="5" y="5" width="184" height="550" rx="15" fill="#181720"/>
+    <line x1="189" y1="5" x2="189" y2="555" stroke="#2c293b"/>
+
+    <!-- Brand header -->
+    <rect x="19" y="20" width="34" height="34" rx="10" fill="#352b54" stroke="#d0bcff" stroke-opacity="0.45"/>
+    <circle cx="36" cy="37" r="11" fill="none" stroke="#d0bcff" stroke-width="1.8"/>
+    <circle cx="36" cy="37" r="3" fill="#d0bcff"/>
+    <text x="62" y="35" font-size="14" font-weight="800" fill="#f2eef8">MissNix</text>
+    <text x="62" y="48" font-size="10" fill="#8f89a3">Release Radar</text>
+
+    <!-- Nav Items (3 destinations) -->
+    <rect x="17" y="70" width="160" height="36" rx="18" fill="#372d56"/>
+    <rect x="14" y="79" width="3" height="18" rx="1.5" fill="#d0bcff"/>
+    <text x="44" y="92" font-size="12" font-weight="700" fill="#ebddff">Release Radar</text>
+    <rect x="145" y="79" width="24" height="18" rx="9" fill="#d0bcff"/>
+    <text x="157" y="92" font-size="10" font-weight="700" fill="#231742" text-anchor="middle">7</text>
+
+    <text x="44" y="132" font-size="12" font-weight="500" fill="#b4aec7">Tracked Artists</text>
+    <text x="44" y="170" font-size="12" font-weight="500" fill="#b4aec7">Library &amp; Settings</text>
+
+    <!-- Bottom Rail Buttons & Status -->
+    <rect x="17" y="418" width="160" height="32" rx="16" fill="#d0bcff"/>
+    <text x="97" y="438" font-size="11.5" font-weight="700" fill="#231742" text-anchor="middle">Check Releases</text>
+
+    <rect x="17" y="458" width="160" height="32" rx="16" fill="#2a2738"/>
+    <text x="97" y="478" font-size="11.5" font-weight="600" fill="#ddd6ee" text-anchor="middle">Scan Music Folders</text>
+
+    <rect x="17" y="498" width="160" height="44" rx="10" fill="#1f1d2a" stroke="#2f2b3f"/>
+    <text x="27" y="516" font-size="10" font-weight="700" fill="#ebe6f5">142 tracked artists · 486 albums</text>
+    <text x="27" y="531" font-size="9.5" fill="#948ea8">Checked 142 artists · 7 new drops</text>
+
+    <!-- Center Release Radar Toolbar -->
+    <text x="208" y="34" font-size="18" font-weight="800" fill="#f3effa">Release Radar</text>
+    <text x="208" y="50" font-size="10.5" fill="#9a94ae">New, upcoming, and catalog releases across your tracked artists</text>
+
+    <!-- Hide Owned toggle + Mark All Seen -->
+    <rect x="520" y="25" width="30" height="16" rx="8" fill="#d0bcff"/>
+    <circle cx="542" cy="33" r="6" fill="#231742"/>
+    <text x="556" y="37" font-size="10.5" fill="#cbc5dc">Hide owned</text>
+    <rect x="626" y="20" width="96" height="28" rx="14" fill="#352b54"/>
+    <text x="674" y="38" font-size="10.5" font-weight="600" fill="#ebddff" text-anchor="middle">Mark All Seen</text>
+
+    <!-- Search + Unified Status & Type Chips -->
+    <rect x="208" y="62" width="154" height="30" rx="15" fill="#22202d" stroke="#343046"/>
+    <text x="224" y="81" font-size="10.5" fill="#827c96">Search artist or release...</text>
+
+    <rect x="370" y="63" width="38" height="28" rx="7" fill="#352b54" stroke="#7c66b8"/>
+    <text x="389" y="81" font-size="10" font-weight="700" fill="#ebddff" text-anchor="middle">All</text>
+
+    <rect x="413" y="63" width="66" height="28" rx="7" fill="#1e1c28" stroke="#302c40"/>
+    <text x="446" y="81" font-size="10" fill="#bcb6cf" text-anchor="middle">Unread (7)</text>
+
+    <rect x="484" y="63" width="64" height="28" rx="7" fill="#1e1c28" stroke="#302c40"/>
+    <text x="516" y="81" font-size="10" fill="#bcb6cf" text-anchor="middle">Upcoming</text>
+
+    <line x1="555" y1="68" x2="555" y2="86" stroke="#322e42"/>
+
+    <rect x="562" y="63" width="52" height="28" rx="7" fill="#1e1c28" stroke="#302c40"/>
+    <text x="588" y="81" font-size="10" fill="#bcb6cf" text-anchor="middle">Albums</text>
+
+    <rect x="619" y="63" width="38" height="28" rx="7" fill="#1e1c28" stroke="#302c40"/>
+    <text x="638" y="81" font-size="10" fill="#bcb6cf" text-anchor="middle">EPs</text>
+
+    <rect x="662" y="63" width="54" height="28" rx="7" fill="#1e1c28" stroke="#302c40"/>
+    <text x="689" y="81" font-size="10" fill="#bcb6cf" text-anchor="middle">Singles</text>
+
+    <line x1="190" y1="102" x2="736" y2="102" stroke="#2a2738"/>
+
+    <!-- Release Cards Grid (3x2) -->
+    <!-- Card 1 (Selected + Playing) -->
+    <g transform="translate(208, 116)">
+      <rect width="160" height="206" rx="12" fill="#252233" stroke="#d0bcff" stroke-width="2"/>
+      <rect x="8" y="8" width="144" height="138" rx="9" fill="url(#cov1)"/>
+      <circle cx="80" cy="77" r="34" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="1.5"/>
+      <rect x="15" y="15" width="44" height="17" rx="5" fill="#101016" fill-opacity="0.82"/>
+      <text x="37" y="27" font-size="8.5" font-weight="700" fill="#e2d4ff" text-anchor="middle">ALBUM</text>
+      <rect x="115" y="15" width="30" height="17" rx="5" fill="#d0bcff"/>
+      <text x="130" y="27" font-size="8.5" font-weight="700" fill="#231742" text-anchor="middle">NEW</text>
+      <text x="10" y="164" font-size="11.5" font-weight="700" fill="#f3effa">Phantom Circuit</text>
+      <text x="10" y="180" font-size="10.5" font-weight="600" fill="#d0bcff">Bicep</text>
+      <text x="10" y="195" font-size="9.5" fill="#8f89a3">2026-11-20 · 11 tracks</text>
+    </g>
+
+    <!-- Card 2 -->
+    <g transform="translate(380, 116)">
+      <rect width="160" height="206" rx="12" fill="#1d1b27" stroke="#2e2a3d"/>
+      <rect x="8" y="8" width="144" height="138" rx="9" fill="url(#cov2)"/>
+      <circle cx="80" cy="77" r="34" fill="none" stroke="#ffffff" stroke-opacity="0.14" stroke-width="1.5"/>
+      <rect x="15" y="15" width="28" height="17" rx="5" fill="#101016" fill-opacity="0.82"/>
+      <text x="29" y="27" font-size="8.5" font-weight="700" fill="#9ae6f5" text-anchor="middle">EP</text>
+      <rect x="89" y="15" width="56" height="17" rx="5" fill="#14532d"/>
+      <text x="117" y="27" font-size="8.5" font-weight="700" fill="#bbf7d0" text-anchor="middle">UPCOMING</text>
+      <text x="10" y="164" font-size="11.5" font-weight="700" fill="#f3effa">Solaris II</text>
+      <text x="10" y="180" font-size="10.5" font-weight="500" fill="#b7b1ca">Boards of Canada</text>
+      <text x="10" y="195" font-size="9.5" fill="#8f89a3">2026-12-04 · 5 tracks</text>
+    </g>
+
+    <!-- Card 3 -->
+    <g transform="translate(552, 116)">
+      <rect width="160" height="206" rx="12" fill="#1d1b27" stroke="#2e2a3d"/>
+      <rect x="8" y="8" width="144" height="138" rx="9" fill="url(#cov3)"/>
+      <circle cx="80" cy="77" r="34" fill="none" stroke="#ffffff" stroke-opacity="0.14" stroke-width="1.5"/>
+      <rect x="15" y="15" width="44" height="17" rx="5" fill="#101016" fill-opacity="0.82"/>
+      <text x="37" y="27" font-size="8.5" font-weight="700" fill="#fde68a" text-anchor="middle">SINGLE</text>
+      <rect x="115" y="15" width="30" height="17" rx="5" fill="#d0bcff"/>
+      <text x="130" y="27" font-size="8.5" font-weight="700" fill="#231742" text-anchor="middle">NEW</text>
+      <text x="10" y="164" font-size="11.5" font-weight="700" fill="#f3effa">Nightbloom</text>
+      <text x="10" y="180" font-size="10.5" font-weight="500" fill="#b7b1ca">Four Tet</text>
+      <text x="10" y="195" font-size="9.5" fill="#8f89a3">2026-11-14 · 2 tracks</text>
+    </g>
+
+    <!-- Second Row (peek above mini-player) -->
+    <g transform="translate(208, 334)">
+      <rect width="160" height="150" rx="12" fill="#1d1b27" stroke="#2e2a3d"/>
+      <rect x="8" y="8" width="144" height="134" rx="9" fill="url(#cov4)"/>
+    </g>
+    <g transform="translate(380, 334)">
+      <rect width="160" height="150" rx="12" fill="#1d1b27" stroke="#2e2a3d"/>
+      <rect x="8" y="8" width="144" height="134" rx="9" fill="url(#cov5)"/>
+    </g>
+    <g transform="translate(552, 334)">
+      <rect width="160" height="150" rx="12" fill="#1d1b27" stroke="#2e2a3d"/>
+      <rect x="8" y="8" width="144" height="134" rx="9" fill="url(#cov6)"/>
+    </g>
+
+    <!-- Docked Bottom 30s Preview Mini-Player (Left-anchored progress!) -->
+    <rect x="190" y="492" width="546" height="63" fill="#1d1b27"/>
+    <line x1="190" y1="492" x2="736" y2="492" stroke="#322e44"/>
+    <rect x="204" y="503" width="40" height="40" rx="9" fill="url(#cov1)"/>
+    <text x="254" y="520" font-size="11.5" font-weight="700" fill="#f3effa">02 · Chroma</text>
+    <text x="254" y="535" font-size="10" fill="#9e98b3">Bicep · Phantom Circuit</text>
+
+    <!-- Play/Pause button + Left-anchored scrubber -->
+    <circle cx="394" cy="523" r="16" fill="#d0bcff"/>
+    <rect x="390" y="517" width="3" height="12" rx="1" fill="#231742"/>
+    <rect x="395" y="517" width="3" height="12" rx="1" fill="#231742"/>
+    <text x="420" y="527" font-size="9.5" font-weight="600" fill="#bcb6cf">0:14</text>
+    <rect x="448" y="520" width="164" height="6" rx="3" fill="#322e45"/>
+    <rect x="448" y="520" width="78" height="6" rx="3" fill="#d0bcff"/>
+    <circle cx="526" cy="523" r="5.5" fill="#d0bcff"/>
+    <text x="620" y="527" font-size="9.5" fill="#8b85a0">0:30</text>
+    <rect x="664" y="521" width="46" height="4" rx="2" fill="#322e45"/>
+    <rect x="664" y="521" width="36" height="4" rx="2" fill="#b4aec7"/>
+
+    <!-- Right Full-Width Inspector Drawer -->
+    <rect x="736" y="5" width="239" height="550" rx="15" fill="#181720"/>
+    <line x1="736" y1="5" x2="736" y2="555" stroke="#2c293b"/>
+
+    <text x="752" y="30" font-size="12" font-weight="700" fill="#a8a2bd">Release Details</text>
+    <circle cx="953" cy="25" r="12" fill="#252233"/>
+    <text x="953" y="29" font-size="12" fill="#cbc5dc" text-anchor="middle">×</text>
+
+    <rect x="780" y="44" width="152" height="152" rx="12" fill="url(#cov1)"/>
+    <circle cx="856" cy="120" r="42" fill="none" stroke="#ffffff" stroke-opacity="0.18" stroke-width="1.5"/>
+
+    <text x="752" y="220" font-size="15" font-weight="800" fill="#f3effa">Phantom Circuit</text>
+    <text x="752" y="237" font-size="12" font-weight="600" fill="#d0bcff">Bicep</text>
+    <text x="752" y="252" font-size="10" fill="#8f89a3">Released 2026-11-20 · DEEZER · MB</text>
+
+    <!-- Seen / Dismiss + Quick Mute / Hide Artist -->
+    <rect x="752" y="264" width="132" height="28" rx="14" fill="#d0bcff"/>
+    <text x="818" y="282" font-size="10.5" font-weight="700" fill="#231742" text-anchor="middle">Mark as Seen</text>
+    <rect x="890" y="264" width="70" height="28" rx="14" fill="none" stroke="#3c3750"/>
+    <text x="925" y="282" font-size="10.5" fill="#d8d2e8" text-anchor="middle">Dismiss</text>
+
+    <rect x="752" y="298" width="102" height="26" rx="13" fill="none" stroke="#3c3750"/>
+    <text x="803" y="315" font-size="10" font-weight="600" fill="#cbc5dc" text-anchor="middle">Mute Artist</text>
+    <rect x="860" y="298" width="100" height="26" rx="13" fill="#462228"/>
+    <text x="910" y="315" font-size="10" font-weight="600" fill="#fecdd3" text-anchor="middle">Hide Artist</text>
+
+    <line x1="752" y1="336" x2="960" y2="336" stroke="#2c293b"/>
+    <text x="752" y="354" font-size="11" font-weight="700" fill="#e6e1f2">Tracklist · Click 30s Preview</text>
+
+    <!-- Tracklist rows -->
+    <text x="756" y="378" font-size="10.5" fill="#bcb6cf">01  Helios</text>
+    <rect x="920" y="366" width="38" height="18" rx="9" fill="#2a2738"/>
+    <text x="939" y="378" font-size="9" font-weight="700" fill="#d0bcff" text-anchor="middle">30s</text>
+
+    <rect x="750" y="388" width="212" height="26" rx="7" fill="#352b54" fill-opacity="0.65"/>
+    <text x="756" y="405" font-size="10.5" font-weight="700" fill="#ebddff">02  Chroma</text>
+    <rect x="920" y="392" width="38" height="18" rx="9" fill="#d0bcff"/>
+    <text x="939" y="404" font-size="9" font-weight="700" fill="#231742" text-anchor="middle">❚❚</text>
+
+    <text x="756" y="432" font-size="10.5" fill="#bcb6cf">03  Velvet Static</text>
+    <rect x="920" y="420" width="38" height="18" rx="9" fill="#2a2738"/>
+    <text x="939" y="432" font-size="9" font-weight="700" fill="#d0bcff" text-anchor="middle">30s</text>
+
+    <text x="756" y="458" font-size="10.5" fill="#bcb6cf">04  Driftline</text>
+    <rect x="920" y="446" width="38" height="18" rx="9" fill="#2a2738"/>
+    <text x="939" y="458" font-size="9" font-weight="700" fill="#d0bcff" text-anchor="middle">30s</text>
+  </g>
+</svg>

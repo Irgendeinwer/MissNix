@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 196" width="920" height="196" role="img" aria-label="MissNix — Local Music Release Radar">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#171522"/>
+      <stop offset="55%" stop-color="#1c192b"/>
+      <stop offset="100%" stop-color="#14131c"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#d0bcff"/>
+      <stop offset="100%" stop-color="#7dd3fc"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="14%" cy="50%" r="48%">
+      <stop offset="0%" stop-color="#d0bcff" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#d0bcff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="920" height="196" rx="22" fill="url(#bg)"/>
+  <rect width="920" height="196" rx="22" fill="url(#glow)"/>
+  <rect x="0.75" y="0.75" width="918.5" height="194.5" rx="21.25" fill="none" stroke="#36324a" stroke-width="1.5"/>
+
+  <!-- Subtle radar arcs on right -->
+  <g stroke="#d0bcff" fill="none" opacity="0.12">
+    <circle cx="848" cy="98" r="56" stroke-width="1.5"/>
+    <circle cx="848" cy="98" r="96" stroke-width="1.5" stroke-dasharray="6 8"/>
+    <circle cx="848" cy="98" r="136" stroke-width="1.5"/>
+  </g>
+
+  <!-- Brand Emblem -->
+  <g transform="translate(42, 42)">
+    <rect width="112" height="112" rx="28" fill="#2b2442" stroke="#d0bcff" stroke-opacity="0.45" stroke-width="1.5"/>
+    <circle cx="56" cy="56" r="40" fill="#161421" stroke="url(#accent)" stroke-width="2.5"/>
+    <circle cx="56" cy="56" r="29" fill="none" stroke="#d0bcff" stroke-opacity="0.32" stroke-width="1.5"/>
+    <circle cx="56" cy="56" r="19" fill="none" stroke="#7dd3fc" stroke-opacity="0.38" stroke-width="1.5"/>
+    <path d="M56 56 L84 28 A40 40 0 0 1 95 52 Z" fill="url(#accent)" opacity="0.28"/>
+    <line x1="56" y1="56" x2="84" y2="28" stroke="url(#accent)" stroke-width="2.5" stroke-linecap="round"/>
+    <circle cx="56" cy="56" r="9" fill="#2b2442" stroke="#d0bcff" stroke-width="2"/>
+    <circle cx="56" cy="56" r="3" fill="#eaddff"/>
+    <circle cx="77" cy="35" r="4.5" fill="#7dd3fc"/>
+  </g>
+
+  <!-- Title & Tagline -->
+  <g font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
+    <text x="182" y="84" font-size="40" font-weight="800" fill="#f3effa" letter-spacing="-0.8">MissNix</text>
+    <text x="184" y="114" font-size="16" font-weight="500" fill="#b9b2cc">Desktop release radar for local music collections</text>
+
+    <!-- Tech pills -->
+    <g transform="translate(184, 132)" font-size="12" font-weight="600">
+      <rect x="0" y="0" width="62" height="26" rx="13" fill="#2b2442" stroke="#4a3f6e"/>
+      <text x="31" y="17" fill="#eaddff" text-anchor="middle">Rust</text>
+
+      <rect x="70" y="0" width="68" height="26" rx="13" fill="#222a3a" stroke="#364a68"/>
+      <text x="104" y="17" fill="#bae6fd" text-anchor="middle">Slint</text>
+
+      <rect x="146" y="0" width="76" height="26" rx="13" fill="#1e322b" stroke="#2f5748"/>
+      <text x="184" y="17" fill="#a7f3d0" text-anchor="middle">SQLite</text>
+
+      <rect x="230" y="0" width="166" height="26" rx="13" fill="#272434" stroke="#3d3852"/>
+      <text x="313" y="17" fill="#d8d2e8" text-anchor="middle">Deezer + MusicBrainz</text>
+
+      <rect x="404" y="0" width="92" height="26" rx="13" fill="#272434" stroke="#3d3852"/>
+      <text x="450" y="17" fill="#d8d2e8" text-anchor="middle">Nix Flake</text>
+    </g>
+  </g>
+</svg>

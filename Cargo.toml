@@ -7,7 +7,12 @@ name = "missnix"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Desktop local music release radar built with Rust, Slint Material, SQLite, and Deezer + MusicBrainz"
+description = "Desktop local music release radar built with Rust, Slint, SQLite, and Deezer + MusicBrainz"
+repository = "https://github.com/Irgendeinwer/MissNix"
+homepage = "https://github.com/Irgendeinwer/MissNix"
+readme = "README.md"
+keywords = ["music", "releases", "slint", "musicbrainz", "deezer"]
+categories = ["multimedia::audio", "gui"]
 default-run = "missnix"
 
 [dependencies]

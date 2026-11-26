@@ -12,8 +12,9 @@ use missnix_core::{
     is_deezer_preview_url_expired, scan_library_folders_with_options, AppPaths, AppSettings,
     Artist, ArtistDiscoveryMode, ArtistSearchCandidate, ArtistSource, ArtistStatus, CoreError,
     Database, FeedQuery, FeedSort, ProgressEvent, ProviderMode, Release, ReleaseState,
-    ReleaseTrack, ReleaseType, ScanOptions, SyncEngine,
+    ReleaseTrack, ReleaseType, ScanOptions, ScanOutcome, SyncEngine,
 };
+use slint::platform::WindowEvent;
 use slint::{
     ComponentHandle, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, Timer,
     TimerMode, VecModel, Weak,
@@ -45,15 +46,25 @@ pub struct UiState {
     pub inflight_avatars: HashSet<i64>,
     pub release_model: Rc<VecModel<ReleaseCardData>>,
     pub artist_model: Rc<VecModel<ArtistRowData>>,
+    pub base_scale_factor: Option<f32>,
     pub last_auto_check: Instant,
 }
 
 pub type SharedUiState = Rc<RefCell<UiState>>;
 type WeakUiState = std::rc::Weak<RefCell<UiState>>;
 
-pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiState, Timer), String> {
-    let db = Database::open(&paths.db_path).map_err(|e| e.to_string())?;
-    let settings = db.load_settings().map_err(|e| e.to_string())?;
+pub fn wire_controller(
+    app: &AppWindow,
+    paths: AppPaths,
+    cli_scale_override: Option<u16>,
+) -> Result<(SharedUiState, (Timer, Timer)), String> {
+    let mut db = Database::open(&paths.db_path).map_err(|e| e.to_string())?;
+    let mut settings = db.load_settings().map_err(|e| e.to_string())?;
+    if let Some(pct) = cli_scale_override {
+        settings.ui_scale_percent = pct.clamp(75, 250);
+        let _ = db.save_settings(&settings);
+    }
+
     let engine = SyncEngine::new(paths.cover_cache_dir.clone());
 
     let (image_tx, image_rx) = mpsc::channel::<ImageJob>();
@@ -107,6 +118,7 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
         inflight_avatars: HashSet::new(),
         release_model,
         artist_model,
+        base_scale_factor: None,
         last_auto_check: Instant::now(),
     }));
 
@@ -121,8 +133,32 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
     // Start persistent background cover-art & artist-avatar downloader/decoder worker
     spawn_image_worker(paths, engine, image_rx, app.as_weak(), &state);
 
+    // Capture native monitor scale factor once winit maps the window, then apply persisted UI scale
+    let startup_scale_timer = Timer::default();
+    {
+        let weak = app.as_weak();
+        let st = state.clone();
+        let env_has_slint_scale = std::env::var_os("SLINT_SCALE_FACTOR").is_some();
+        startup_scale_timer.start(
+            TimerMode::SingleShot,
+            Duration::from_millis(25),
+            move || {
+                let Some(win) = weak.upgrade() else { return };
+                let mut guard = st.borrow_mut();
+                let native_sf = win.window().scale_factor();
+                if guard.base_scale_factor.is_none() {
+                    guard.base_scale_factor = Some(if native_sf > 0.0 { native_sf } else { 1.0 });
+                }
+                let pct = guard.settings.ui_scale_percent;
+                if pct != 100 && (!env_has_slint_scale || cli_scale_override.is_some()) {
+                    apply_ui_scale_to_window(&win, &mut guard, pct);
+                }
+            },
+        );
+    }
+
     // -------------------------------------------------------------------------
-    // Navigation & Global Task Callbacks
+    // Navigation & Global Task Callbacks (0=Radar, 1=Artists, 2=Settings)
     // -------------------------------------------------------------------------
     {
         let weak = app.as_weak();
@@ -130,11 +166,15 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
         app.on_navigate(move |view_idx| {
             let Some(win) = weak.upgrade() else { return };
             win.set_active_view(view_idx);
+            if view_idx == 1 && win.get_inspector_mode() == 1 {
+                win.set_inspector_mode(0);
+                win.set_selected_release_id(0);
+            }
             let mut guard = st.borrow_mut();
             match view_idx {
-                0 | 1 => refresh_feed(&win, &mut guard),
-                2 => refresh_artists(&win, &mut guard),
-                3 => refresh_folders_and_stats(&win, &guard),
+                0 => refresh_feed(&win, &mut guard),
+                1 => refresh_artists(&win, &mut guard),
+                2 => refresh_folders_and_stats(&win, &guard),
                 _ => {}
             }
         });
@@ -191,7 +231,6 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
                 return;
             };
 
-            // Populate Mini-Player cover art immediately
             if let Some(cov) = guard.decoded_covers.get(&rel.id) {
                 win.set_preview_cover(cov.clone());
                 win.set_preview_has_cover(true);
@@ -247,7 +286,7 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
     }
 
     // -------------------------------------------------------------------------
-    // Release Feed & Inspector Callbacks
+    // Unified Release Radar & Right Inspector Callbacks
     // -------------------------------------------------------------------------
     {
         let weak = app.as_weak();
@@ -265,6 +304,7 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
             let Some(win) = weak.upgrade() else { return };
             win.set_filtered_artist_id(0);
             win.set_filtered_artist_name(SharedString::default());
+            win.set_filtered_artist_status("tracked".into());
             refresh_feed(&win, &mut st.borrow_mut());
         });
     }
@@ -274,9 +314,11 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
         let st = state.clone();
         app.on_select_release(move |rel_id| {
             let Some(win) = weak.upgrade() else { return };
-            if win.get_selected_release_id() == rel_id
-                && (win.get_active_view() == 0 || win.get_active_view() == 1)
+            if win.get_inspector_mode() == 1
+                && win.get_selected_release_id() == rel_id
+                && win.get_active_view() == 0
             {
+                win.set_inspector_mode(0);
                 win.set_selected_release_id(0);
                 win.set_loading_tracks(false);
                 return;
@@ -287,9 +329,11 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
 
     {
         let weak = app.as_weak();
-        app.on_close_release_inspector(move || {
+        app.on_close_inspector(move || {
             if let Some(win) = weak.upgrade() {
+                win.set_inspector_mode(0);
                 win.set_selected_release_id(0);
+                win.set_selected_artist_id(0);
                 win.set_loading_tracks(false);
             }
         });
@@ -329,7 +373,8 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
             let _ = guard
                 .db
                 .set_release_state(rel_id as i64, ReleaseState::Dismissed);
-            if win.get_selected_release_id() == rel_id {
+            if win.get_inspector_mode() == 1 && win.get_selected_release_id() == rel_id {
+                win.set_inspector_mode(0);
                 win.set_selected_release_id(0);
             }
             refresh_folders_and_stats(&win, &guard);
@@ -376,17 +421,20 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
         });
     }
 
+    // Clicking an artist directly in Release Radar opens the full-width Artist Inspector
+    // right beside Release Radar (preserving scroll position!) with Mute & Hide actions ready.
     {
         let weak = app.as_weak();
         let st = state.clone();
-        app.on_jump_to_artist(move |artist_id| {
+        app.on_inspect_artist(move |artist_id| {
             let Some(win) = weak.upgrade() else { return };
-            win.set_active_view(2);
-            win.set_artist_filter_index(0);
-            win.set_artist_search_text(SharedString::default());
+            if win.get_inspector_mode() == 2 && win.get_selected_artist_id() == artist_id {
+                win.set_inspector_mode(0);
+                win.set_selected_artist_id(0);
+                return;
+            }
             let mut guard = st.borrow_mut();
-            refresh_artists(&win, &mut guard);
-            select_artist_detail(&win, &guard, artist_id as i64);
+            select_artist_detail(&win, &mut guard, artist_id as i64);
         });
     }
 
@@ -407,7 +455,8 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
         let st = state.clone();
         app.on_select_artist(move |artist_id| {
             let Some(win) = weak.upgrade() else { return };
-            select_artist_detail(&win, &st.borrow(), artist_id as i64);
+            let mut guard = st.borrow_mut();
+            select_artist_detail(&win, &mut guard, artist_id as i64);
         });
     }
 
@@ -428,7 +477,9 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
             if let Ok(Some(artist)) = guard.db.get_artist(artist_id as i64) {
                 win.set_filtered_artist_id(artist_id);
                 win.set_filtered_artist_name(artist.name.into());
-                win.set_active_view(1);
+                win.set_filtered_artist_status(artist.status.as_str().into());
+                win.set_feed_status_index(0);
+                win.set_active_view(0);
                 refresh_feed(&win, &mut guard);
             }
         });
@@ -447,11 +498,18 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
                     ArtistStatus::Muted
                 };
                 let _ = guard.db.set_artist_status(art.id, next);
+                win.set_status_is_warning(false);
+                win.set_status_banner_text(
+                    if next == ArtistStatus::Muted {
+                        format!("Muted '{}' in Release Radar", art.name)
+                    } else {
+                        format!("Unmuted '{}'", art.name)
+                    }
+                    .into(),
+                );
+                sync_artist_status_badges(&win, &mut guard, artist_id, next);
                 refresh_folders_and_stats(&win, &guard);
                 refresh_artists(&win, &mut guard);
-                if win.get_selected_artist_id() == artist_id {
-                    select_artist_detail(&win, &guard, artist_id as i64);
-                }
                 refresh_feed(&win, &mut guard);
             }
         });
@@ -470,11 +528,18 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
                     ArtistStatus::Ignored
                 };
                 let _ = guard.db.set_artist_status(art.id, next);
+                win.set_status_is_warning(false);
+                win.set_status_banner_text(
+                    if next == ArtistStatus::Ignored {
+                        format!("Hidden '{}' from Release Radar", art.name)
+                    } else {
+                        format!("Restored '{}' to Release Radar", art.name)
+                    }
+                    .into(),
+                );
+                sync_artist_status_badges(&win, &mut guard, artist_id, next);
                 refresh_folders_and_stats(&win, &guard);
                 refresh_artists(&win, &mut guard);
-                if win.get_selected_artist_id() == artist_id {
-                    select_artist_detail(&win, &guard, artist_id as i64);
-                }
                 refresh_feed(&win, &mut guard);
             }
         });
@@ -489,6 +554,9 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
             let _ = guard.db.delete_artist(artist_id as i64);
             if win.get_selected_artist_id() == artist_id {
                 win.set_selected_artist_id(0);
+                if win.get_inspector_mode() == 2 {
+                    win.set_inspector_mode(0);
+                }
             }
             refresh_folders_and_stats(&win, &guard);
             refresh_artists(&win, &mut guard);
@@ -509,14 +577,25 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
                     Ok(v) if v > 0 => Some(v),
                     _ => {
                         win.set_status_is_warning(true);
-                        win.set_status_banner_text("Deezer ID must be a positive integer".into());
+                        win.set_status_banner_text(
+                            "Deezer Artist ID must be a positive number".into(),
+                        );
                         return;
                     }
                 }
             };
-            let mbid_opt = {
-                let t = mbid_s.trim();
-                (!t.is_empty()).then_some(t)
+
+            let mbid_trimmed = mbid_s.trim();
+            let mbid_opt = if mbid_trimmed.is_empty() {
+                None
+            } else if mbid_trimmed.len() != 36
+                || mbid_trimmed.chars().filter(|&c| c == '-').count() != 4
+            {
+                win.set_status_is_warning(true);
+                win.set_status_banner_text("MusicBrainz MBID must be a 36-char UUID".into());
+                return;
+            } else {
+                Some(mbid_trimmed)
             };
 
             let mut guard = st.borrow_mut();
@@ -531,7 +610,7 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
             win.set_status_is_warning(false);
             win.set_status_banner_text("Saved artist provider IDs".into());
             refresh_artists(&win, &mut guard);
-            select_artist_detail(&win, &guard, artist_id as i64);
+            select_artist_detail(&win, &mut guard, artist_id as i64);
         });
     }
 
@@ -671,7 +750,7 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
     }
 
     // -------------------------------------------------------------------------
-    // Library Folders & Preferences Callbacks
+    // Library Folders, UI Scale & Preferences Callbacks
     // -------------------------------------------------------------------------
     {
         let weak = app.as_weak();
@@ -734,14 +813,20 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
         app.on_remove_folder(move |folder_id| {
             let Some(win) = weak.upgrade() else { return };
             let has_remaining = {
-                let guard = st.borrow();
+                let mut guard = st.borrow_mut();
                 let _ = guard.db.remove_library_folder(folder_id as i64);
-                refresh_folders_and_stats(&win, &guard);
-                guard
+                let remaining = guard
                     .db
                     .list_library_folders()
-                    .map(|v| !v.is_empty())
-                    .unwrap_or(false)
+                    .map(|v| v.iter().any(|f| f.enabled))
+                    .unwrap_or(false);
+                if !remaining {
+                    let _ = guard.db.apply_scan_outcome(&ScanOutcome::default());
+                    refresh_artists(&win, &mut guard);
+                    refresh_feed(&win, &mut guard);
+                }
+                refresh_folders_and_stats(&win, &guard);
+                remaining
             };
             if has_remaining && !win.get_is_busy() {
                 start_library_scan(&weak, &st);
@@ -804,6 +889,22 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
         });
     }
 
+    {
+        let weak = app.as_weak();
+        let st = state.clone();
+        app.on_ui_scale_changed(move |pct| {
+            let Some(win) = weak.upgrade() else { return };
+            let clamped = (pct.clamp(75, 250)) as u16;
+            let mut guard = st.borrow_mut();
+            guard.settings.ui_scale_percent = clamped;
+            let s = guard.settings.clone();
+            let _ = guard.db.save_settings(&s);
+            apply_ui_scale_to_window(&win, &mut guard, clamped);
+            win.set_status_is_warning(false);
+            win.set_status_banner_text(format!("Interface scale set to {clamped}%").into());
+        });
+    }
+
     // -------------------------------------------------------------------------
     // Periodic Background Schedule Timer (checks every 60s whether interval elapsed)
     // -------------------------------------------------------------------------
@@ -837,11 +938,56 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
         });
     }
 
-    Ok((state, schedule_timer))
+    Ok((state, (startup_scale_timer, schedule_timer)))
 }
 
 thread_local! {
     static CANDIDATE_STASH: RefCell<Vec<ArtistSearchCandidate>> = const { RefCell::new(Vec::new()) };
+}
+
+fn apply_ui_scale_to_window(win: &AppWindow, state: &mut UiState, scale_pct: u16) {
+    let clamped = scale_pct.clamp(75, 250);
+    win.set_pref_ui_scale_pct(i32::from(clamped));
+
+    let base = *state.base_scale_factor.get_or_insert_with(|| {
+        let sf = win.window().scale_factor();
+        if sf > 0.0 {
+            sf
+        } else {
+            1.0
+        }
+    });
+
+    let effective = (base * (f32::from(clamped) / 100.0)).clamp(0.5, 4.0);
+    let phys = win.window().size();
+    win.window()
+        .dispatch_event(WindowEvent::ScaleFactorChanged {
+            scale_factor: effective,
+        });
+    if phys.width > 0 && phys.height > 0 {
+        win.window().dispatch_event(WindowEvent::Resized {
+            size: phys.to_logical(effective),
+        });
+    }
+    win.window().request_redraw();
+}
+
+fn sync_artist_status_badges(
+    win: &AppWindow,
+    state: &mut UiState,
+    artist_id: i32,
+    next_status: ArtistStatus,
+) {
+    let status_str: SharedString = next_status.as_str().into();
+    if win.get_selected_release().artist_id == artist_id {
+        win.set_selected_release_artist_status(status_str.clone());
+    }
+    if win.get_filtered_artist_id() == artist_id {
+        win.set_filtered_artist_status(status_str);
+    }
+    if win.get_selected_artist_id() == artist_id {
+        select_artist_detail(win, state, artist_id as i64);
+    }
 }
 
 // =============================================================================
@@ -867,7 +1013,7 @@ fn start_library_scan(weak: &Weak<AppWindow>, state: &Rc<RefCell<UiState>>) {
         if enabled.is_empty() {
             win.set_status_is_warning(true);
             win.set_status_banner_text("Add at least one music folder first".into());
-            win.set_active_view(3);
+            win.set_active_view(2);
             return;
         }
         guard.cancel_flag = Arc::new(AtomicBool::new(false));
@@ -1095,9 +1241,19 @@ fn open_release_inspector(win: &AppWindow, state: &Rc<RefCell<UiState>>, release
         let Ok(Some(rel)) = guard.db.get_release(release_id) else {
             return;
         };
+        let artist_status = guard
+            .db
+            .get_artist(rel.artist_id)
+            .ok()
+            .flatten()
+            .map(|a| a.status.as_str())
+            .unwrap_or("tracked");
+
         let card = to_release_card(&rel, guard.decoded_covers.get(&rel.id));
-        win.set_selected_release_id(release_id as i32);
+        win.set_selected_release_artist_status(artist_status.into());
         win.set_selected_release(card);
+        win.set_selected_release_id(release_id as i32);
+        win.set_inspector_mode(1);
 
         let cached = guard.db.list_release_tracks(release_id).unwrap_or_default();
         (
@@ -1170,7 +1326,7 @@ fn spawn_image_worker(
                     else {
                         continue;
                     };
-                    let Some((w, h, rgba)) = decode_thumbnail_rgba(&local_path, 360) else {
+                    let Some((w, h, rgba)) = decode_thumbnail_rgba(&local_path, 300) else {
                         continue;
                     };
 
@@ -1297,6 +1453,7 @@ fn apply_settings_to_window(win: &AppWindow, s: &AppSettings) {
     win.set_pref_dark_mode(s.dark_mode);
     win.set_pref_accent_preset(i32::from(s.accent_preset));
     win.set_pref_grid_density(i32::from(s.grid_density));
+    win.set_pref_ui_scale_pct(i32::from(s.ui_scale_percent));
     win.set_preview_volume_pct(i32::from(s.preview_volume));
     win.set_pref_discovery_mode(s.artist_discovery_mode.index());
     win.set_pref_split_collaborations(s.split_collaborations);
@@ -1318,6 +1475,7 @@ fn read_settings_from_window(win: &AppWindow) -> AppSettings {
         dark_mode: win.get_pref_dark_mode(),
         accent_preset: win.get_pref_accent_preset().clamp(0, 5) as u8,
         grid_density: win.get_pref_grid_density().clamp(0, 2) as u8,
+        ui_scale_percent: win.get_pref_ui_scale_pct().clamp(75, 250) as u16,
         preview_volume: win.get_preview_volume_pct().clamp(0, 100) as u8,
         lookback_days: AppSettings::lookback_days_from_index(win.get_pref_lookback_index()),
         include_albums: win.get_pref_include_albums(),
@@ -1378,7 +1536,7 @@ fn refresh_folders_and_stats(win: &AppWindow, state: &UiState) {
 }
 
 fn refresh_feed(win: &AppWindow, state: &mut UiState) {
-    let only_unseen = win.get_active_view() == 0;
+    let status_idx = win.get_feed_status_index();
     let release_type = match win.get_feed_type_index() {
         1 => Some(ReleaseType::Album),
         2 => Some(ReleaseType::Ep),
@@ -1395,7 +1553,9 @@ fn refresh_feed(win: &AppWindow, state: &mut UiState) {
         include_albums: state.settings.include_albums,
         include_eps: state.settings.include_eps,
         include_singles: state.settings.include_singles,
-        only_unseen,
+        only_unseen: status_idx == 1,
+        only_upcoming: status_idx == 2,
+        only_seen: false,
         hide_owned: win.get_feed_hide_owned(),
         include_dismissed: false,
         artist_id,
@@ -1456,22 +1616,38 @@ fn refresh_artists(win: &AppWindow, state: &mut UiState) {
     }
 }
 
-fn select_artist_detail(win: &AppWindow, state: &UiState, artist_id: i64) {
+fn select_artist_detail(win: &AppWindow, state: &mut UiState, artist_id: i64) {
     if artist_id <= 0 {
         win.set_selected_artist_id(0);
+        if win.get_inspector_mode() == 2 {
+            win.set_inspector_mode(0);
+        }
         return;
     }
     let Ok(Some(artist)) = state.db.get_artist(artist_id) else {
         win.set_selected_artist_id(0);
+        if win.get_inspector_mode() == 2 {
+            win.set_inspector_mode(0);
+        }
         return;
     };
 
+    let cached_avatar = state.decoded_avatars.get(&artist.id).cloned();
+    if cached_avatar.is_none()
+        && artist.avatar_url.is_some()
+        && !state.inflight_avatars.contains(&artist.id)
+    {
+        state.inflight_avatars.insert(artist.id);
+        let _ = state.image_tx.send(ImageJob::ArtistAvatar(artist.clone()));
+    }
+
     let today = today_iso_utc();
-    let row = to_artist_row(&artist, state.decoded_avatars.get(&artist.id), &today);
+    let row = to_artist_row(&artist, cached_avatar.as_ref(), &today);
     win.set_edit_artist_mbid(row.mbid.clone());
     win.set_edit_artist_deezer_id(row.deezer_id.clone());
     win.set_selected_artist(row);
     win.set_selected_artist_id(artist_id as i32);
+    win.set_inspector_mode(2);
 
     let albums = state
         .db
