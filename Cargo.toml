@@ -12,7 +12,10 @@ default-run = "missnix"
 
 [dependencies]
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+libc = "0.2"
+libloading = "0.8"
 missnix-core = { path = "crates/missnix-core" }
+nanomp3 = "0.1.1"
 open = "5.3"
 slint = { version = "1.19", default-features = false, features = [
     "std",

@@ -95,8 +95,9 @@ const CANONICAL_DDL: &str = "
 
 use crate::error::{CoreError, CoreResult};
 use crate::models::{
-    AppSettings, Artist, ArtistSource, ArtistStatus, FeedQuery, FeedSort, LibraryFolder,
-    LibraryStats, LocalAlbum, ProviderMode, Release, ReleaseState, ReleaseTrack, ReleaseType,
+    AppSettings, Artist, ArtistDiscoveryMode, ArtistSource, ArtistStatus, FeedQuery, FeedSort,
+    LibraryFolder, LibraryStats, LocalAlbum, ProviderMode, Release, ReleaseState, ReleaseTrack,
+    ReleaseType,
 };
 use crate::normalize::{
     normalize_artist_name, normalize_release_title, now_rfc3339_utc, today_iso_utc,
@@ -362,6 +363,21 @@ impl Database {
                     ],
                 )?;
             }
+        }
+
+        // Prune stale `local` + `tracked` artists that no longer match any audio file
+        // (for instance, old fake combined collaboration rows like "Alligatoah, Jamal" or
+        // removed folders), while preserving manual artists and muted/ignored preferences.
+        // Guarded on `folders_scanned > 0 && audio_files_seen > 0` so an unmounted drive
+        // never wipes out a user's tracked catalog.
+        if outcome.summary.folders_scanned > 0 && outcome.summary.audio_files_seen > 0 {
+            tx.execute(
+                "DELETE FROM artists
+                 WHERE source = 'local'
+                   AND status = 'tracked'
+                   AND local_track_count = 0",
+                [],
+            )?;
         }
 
         // Recompute `owned_locally` across all discovered releases immediately!
@@ -975,6 +991,21 @@ impl Database {
             let (k, v) = row?;
             match k.as_str() {
                 "dark_mode" => s.dark_mode = v == "true",
+                "accent_preset" => {
+                    if let Ok(n) = v.parse::<u8>() {
+                        s.accent_preset = n.min(5);
+                    }
+                }
+                "grid_density" => {
+                    if let Ok(n) = v.parse::<u8>() {
+                        s.grid_density = n.min(2);
+                    }
+                }
+                "preview_volume" => {
+                    if let Ok(n) = v.parse::<u8>() {
+                        s.preview_volume = n.min(100);
+                    }
+                }
                 "lookback_days" => {
                     if let Ok(n) = v.parse::<u32>() {
                         s.lookback_days = n;
@@ -986,6 +1017,10 @@ impl Database {
                 "hide_owned_locally" => s.hide_owned_locally = v == "true",
                 "hide_compilations_and_live" => s.hide_compilations_and_live = v == "true",
                 "include_compilation_artists" => s.include_compilation_artists = v == "true",
+                "artist_discovery_mode" => {
+                    s.artist_discovery_mode = ArtistDiscoveryMode::from_db(&v)
+                }
+                "split_collaborations" => s.split_collaborations = v == "true",
                 "auto_check_interval_hours" => {
                     if let Ok(n) = v.parse::<u32>() {
                         s.auto_check_interval_hours = n;
@@ -1000,8 +1035,11 @@ impl Database {
 
     pub fn save_settings(&mut self, s: &AppSettings) -> CoreResult<()> {
         let tx = self.conn.transaction()?;
-        let pairs: [(&str, String); 10] = [
+        let pairs: [(&str, String); 15] = [
             ("dark_mode", s.dark_mode.to_string()),
+            ("accent_preset", s.accent_preset.to_string()),
+            ("grid_density", s.grid_density.to_string()),
+            ("preview_volume", s.preview_volume.to_string()),
             ("lookback_days", s.lookback_days.to_string()),
             ("include_albums", s.include_albums.to_string()),
             ("include_eps", s.include_eps.to_string()),
@@ -1015,6 +1053,11 @@ impl Database {
                 "include_compilation_artists",
                 s.include_compilation_artists.to_string(),
             ),
+            (
+                "artist_discovery_mode",
+                s.artist_discovery_mode.as_str().to_string(),
+            ),
+            ("split_collaborations", s.split_collaborations.to_string()),
             (
                 "auto_check_interval_hours",
                 s.auto_check_interval_hours.to_string(),
@@ -2189,5 +2232,101 @@ mod tests {
         }
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prunes_stale_polluted_local_artists_on_rescan_and_persists_new_settings() {
+        let mut db = Database::open_in_memory().unwrap();
+
+        // Seed an initial scan that contained a polluted collaboration row + a muted artist + a manual artist
+        let mut initial = ScanOutcome::default();
+        initial.summary.folders_scanned = 1;
+        initial.summary.audio_files_seen = 3;
+        initial.artists.insert(
+            "alligatoah".to_string(),
+            DiscoveredArtistRecord {
+                display_name: "Alligatoah".to_string(),
+                normalized_name: "alligatoah".to_string(),
+                mbid: None,
+                track_count: 10,
+                albums: HashMap::new(),
+            },
+        );
+        initial.artists.insert(
+            "alligatoah jamal".to_string(),
+            DiscoveredArtistRecord {
+                display_name: "Alligatoah, Jamal".to_string(),
+                normalized_name: "alligatoah jamal".to_string(),
+                mbid: None,
+                track_count: 1,
+                albums: HashMap::new(),
+            },
+        );
+        initial.artists.insert(
+            "muted local".to_string(),
+            DiscoveredArtistRecord {
+                display_name: "Muted Local".to_string(),
+                normalized_name: "muted local".to_string(),
+                mbid: None,
+                track_count: 1,
+                albums: HashMap::new(),
+            },
+        );
+        db.apply_scan_outcome(&initial).unwrap();
+
+        let muted = db
+            .list_artists("Muted Local", None, false)
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        db.set_artist_status(muted.id, ArtistStatus::Muted).unwrap();
+        db.add_manual_artist("Manual Favorite", None, None, None, None, None)
+            .unwrap();
+
+        // Rescan with clean primary artist extraction: "Alligatoah, Jamal" is no longer present
+        let mut clean_scan = ScanOutcome::default();
+        clean_scan.summary.folders_scanned = 1;
+        clean_scan.summary.audio_files_seen = 11;
+        clean_scan.artists.insert(
+            "alligatoah".to_string(),
+            DiscoveredArtistRecord {
+                display_name: "Alligatoah".to_string(),
+                normalized_name: "alligatoah".to_string(),
+                mbid: None,
+                track_count: 11,
+                albums: HashMap::new(),
+            },
+        );
+        db.apply_scan_outcome(&clean_scan).unwrap();
+
+        let all = db.list_artists("", None, false).unwrap();
+        let names: Vec<&str> = all.iter().map(|a| a.name.as_str()).collect();
+        assert!(names.contains(&"Alligatoah"));
+        assert!(names.contains(&"Manual Favorite"));
+        assert!(names.contains(&"Muted Local"));
+        assert!(!names.contains(&"Alligatoah, Jamal"));
+
+        // Persist and reload customization & scan settings
+        let custom = AppSettings {
+            dark_mode: false,
+            accent_preset: 3,
+            grid_density: 2,
+            preview_volume: 65,
+            artist_discovery_mode: ArtistDiscoveryMode::FolderOnly,
+            split_collaborations: false,
+            ..AppSettings::default()
+        };
+        db.save_settings(&custom).unwrap();
+        let loaded = db.load_settings().unwrap();
+        assert!(!loaded.dark_mode);
+        assert_eq!(loaded.accent_preset, 3);
+        assert_eq!(loaded.grid_density, 2);
+        assert_eq!(loaded.preview_volume, 65);
+        assert_eq!(
+            loaded.artist_discovery_mode,
+            ArtistDiscoveryMode::FolderOnly
+        );
+        assert!(!loaded.split_collaborations);
     }
 }

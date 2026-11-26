@@ -1,0 +1,90 @@
+export global Theme {
+    in-out property <bool> dark-mode: true;
+    // 0 = Iris Violet, 1 = Nord Frost, 2 = Emerald Sage, 3 = Amber Gold, 4 = Coral Rose, 5 = Sunset Copper
+    in-out property <int> accent-preset: 0;
+
+    // -------------------------------------------------------------------------
+    // Material 3 Surface Container Hierarchy (Desktop-tuned contrast)
+    // -------------------------------------------------------------------------
+    out property <color> surface: root.dark-mode ? #121218 : #f8f7fc;
+    out property <color> surface-rail: root.dark-mode ? #171720 : #efedf7;
+    out property <color> surface-container-low: root.dark-mode ? #1a1a24 : #f3f1fa;
+    out property <color> surface-container: root.dark-mode ? #1e1e29 : #ffffff;
+    out property <color> surface-container-high: root.dark-mode ? #262635 : #e9e6f3;
+    out property <color> surface-container-highest: root.dark-mode ? #303042 : #dfdbe9;
+
+    out property <color> on-surface: root.dark-mode ? #f1eff8 : #1b1a22;
+    out property <color> on-surface-variant: root.dark-mode ? #a8a5b8 : #565366;
+    out property <color> on-surface-muted: root.dark-mode ? #7b788d : #787589;
+
+    out property <color> outline: root.dark-mode ? #464457 : #c6c3d4;
+    out property <color> outline-variant: root.dark-mode ? #2d2c3a : #e0ddeb;
+
+    // -------------------------------------------------------------------------
+    // Dynamic Material 3 Primary & Container Tokens per Accent Preset
+    // -------------------------------------------------------------------------
+    out property <color> primary: root.dark-mode
+        ? (root.accent-preset == 1 ? #7dd3fc
+         : root.accent-preset == 2 ? #6ee7b7
+         : root.accent-preset == 3 ? #fcd34d
+         : root.accent-preset == 4 ? #fda4af
+         : root.accent-preset == 5 ? #fdba74
+         : #d0bcff)
+        : (root.accent-preset == 1 ? #0369a1
+         : root.accent-preset == 2 ? #0f766e
+         : root.accent-preset == 3 ? #92400e
+         : root.accent-preset == 4 ? #be123c
+         : root.accent-preset == 5 ? #c2410c
+         : #6750a4);
+
+    out property <color> on-primary: root.dark-mode
+        ? (root.accent-preset == 1 ? #082f49
+         : root.accent-preset == 2 ? #064e3b
+         : root.accent-preset == 3 ? #451a03
+         : root.accent-preset == 4 ? #4c0519
+         : root.accent-preset == 5 ? #431407
+         : #381e72)
+        : #ffffff;
+
+    out property <color> primary-container: root.dark-mode
+        ? (root.accent-preset == 1 ? #123c56
+         : root.accent-preset == 2 ? #114237
+         : root.accent-preset == 3 ? #4d3812
+         : root.accent-preset == 4 ? #541d29
+         : root.accent-preset == 5 ? #512813
+         : #3c2d63)
+        : (root.accent-preset == 1 ? #e0f2fe
+         : root.accent-preset == 2 ? #d1fae5
+         : root.accent-preset == 3 ? #fef3c7
+         : root.accent-preset == 4 ? #ffe4e6
+         : root.accent-preset == 5 ? #ffedd5
+         : #eaddff);
+
+    out property <color> on-primary-container: root.dark-mode
+        ? (root.accent-preset == 1 ? #bae6fd
+         : root.accent-preset == 2 ? #a7f3d0
+         : root.accent-preset == 3 ? #fde68a
+         : root.accent-preset == 4 ? #fecdd3
+         : root.accent-preset == 5 ? #fed7aa
+         : #eaddff)
+        : (root.accent-preset == 1 ? #0c4a6e
+         : root.accent-preset == 2 ? #065f46
+         : root.accent-preset == 3 ? #78350f
+         : root.accent-preset == 4 ? #881337
+         : root.accent-preset == 5 ? #7c2d12
+         : #21005d);
+
+    out property <color> secondary-container: root.dark-mode ? #2c2a3b : #e6e3f3;
+    out property <color> on-secondary-container: root.dark-mode ? #dddaf0 : #2a2838;
+
+    // Semantic Status Tokens
+    out property <color> error: root.dark-mode ? #f2b8b5 : #b3261e;
+    out property <color> error-container: root.dark-mode ? #4a2326 : #f9dedc;
+    out property <color> on-error-container: root.dark-mode ? #f9dedc : #601410;
+
+    out property <color> warning-container: root.dark-mode ? #46381e : #fef3c7;
+    out property <color> on-warning-container: root.dark-mode ? #fde68a : #78350f;
+
+    out property <color> success-container: root.dark-mode ? #163e31 : #d1fae5;
+    out property <color> on-success-container: root.dark-mode ? #a7f3d0 : #065f46;
+}

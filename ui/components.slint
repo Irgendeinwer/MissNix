@@ -1,4 +1,4 @@
-import { Button, Palette } from "std-widgets.slint";
+import { Theme } from "theme.slint";
 import {
     ArtistRowData,
     FolderRowData,
@@ -8,20 +8,82 @@ import {
     TrackRowData,
 } from "models.slint";
 
+// =============================================================================
+// Dynamic Custom Brand Logo (Reacts to Accent Theme & Active Radar Scan/Sync)
+// =============================================================================
+export component MissNixLogo inherits Rectangle {
+    in property <bool> scanning: false;
+
+    width: 40px;
+    height: 40px;
+    vertical-stretch: 0;
+    horizontal-stretch: 0;
+    border-radius: 12px;
+    background: Theme.primary-container;
+    border-width: 1px;
+    border-color: logo-touch.has-hover ? Theme.primary : Theme.primary.with-alpha(0.42);
+    clip: true;
+
+    animate background { duration: 180ms; }
+    animate border-color { duration: 150ms; }
+
+    // Subtle pulsing radar wave when syncing/scanning
+    if root.scanning : Rectangle {
+        property <float> phase: Math.mod(animation-tick() / 1200ms, 1.0);
+        width: 14px + self.phase * 26px;
+        height: self.width;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        border-radius: self.width / 2;
+        border-width: 1.5px;
+        border-color: Theme.primary.with-alpha(1.0 - self.phase);
+        background: transparent;
+    }
+
+    Image {
+        width: 30px;
+        height: 30px;
+        x: 5px;
+        y: 5px;
+        source: @image-url("../assets/icons/logo-mark.svg");
+        colorize: Theme.primary;
+        image-fit: ImageFit.contain;
+    }
+
+    // Orbiting radar blip dot during active scan/check, resting at 45° otherwise
+    Rectangle {
+        property <angle> theta: root.scanning
+            ? (Math.mod(animation-tick() / 1400ms, 1.0) * 360deg)
+            : -45deg;
+        width: 5px;
+        height: 5px;
+        border-radius: 2.5px;
+        background: Theme.on-primary-container;
+        x: 20px + Math.cos(self.theta) * 9.5px - 2.5px;
+        y: 20px + Math.sin(self.theta) * 9.5px - 2.5px;
+    }
+
+    logo-touch := TouchArea {}
+}
+
+// =============================================================================
+// Bounded Material 3 Tonal Badge (Never stretches horizontally or vertically)
+// =============================================================================
 export component TonalBadge inherits Rectangle {
     in property <string> label;
-    in property <brush> badge-bg: Palette.control-background;
-    in property <brush> badge-fg: Palette.control-foreground;
+    in property <brush> badge-bg: Theme.secondary-container;
+    in property <brush> badge-fg: Theme.on-secondary-container;
 
     height: 20px;
-    min-width: txt.preferred-width + 12px;
-    border-radius: 5px;
+    width: txt.preferred-width + 12px;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    border-radius: 6px;
     background: root.badge-bg;
 
     txt := Text {
-        x: 6px;
-        width: parent.width - 12px;
-        height: parent.height;
+        width: 100%;
+        height: 100%;
         text: root.label;
         color: root.badge-fg;
         font-size: 10px;
@@ -32,36 +94,497 @@ export component TonalBadge inherits Rectangle {
     }
 }
 
+// =============================================================================
+// Bounded Material 3 Desktop Button (Filled / Tonal / Outlined / Danger)
+// =============================================================================
+export component M3Button inherits Rectangle {
+    in property <string> text;
+    // "filled", "tonal", "primary-tonal", "outlined", "danger"
+    in property <string> variant: "tonal";
+    in property <image> icon;
+    in property <bool> has-icon: false;
+    in property <bool> enabled: true;
+    in property <bool> compact: false;
+    in property <bool> fill-width: false;
+    callback clicked();
+
+    property <color> base-bg: root.variant == "filled" ? Theme.primary
+                            : root.variant == "primary-tonal" ? Theme.primary-container
+                            : root.variant == "danger" ? Theme.error-container
+                            : root.variant == "outlined" ? #00000000
+                            : Theme.secondary-container;
+
+    property <color> fg-color: root.variant == "filled" ? Theme.on-primary
+                             : root.variant == "primary-tonal" ? Theme.on-primary-container
+                             : root.variant == "danger" ? Theme.on-error-container
+                             : root.variant == "outlined" ? Theme.on-surface
+                             : Theme.on-secondary-container;
+
+    height: root.compact ? 32px : 36px;
+    vertical-stretch: 0;
+    horizontal-stretch: root.fill-width ? 1 : 0;
+    min-width: content-row.preferred-width;
+    preferred-width: content-row.preferred-width;
+    border-radius: self.height / 2;
+    opacity: root.enabled ? 1.0 : 0.45;
+
+    background: !root.enabled ? root.base-bg
+              : touch.pressed ? (root.variant == "outlined" ? Theme.on-surface.with-alpha(0.14) : root.base-bg.darker(0.10))
+              : touch.has-hover ? (root.variant == "outlined" ? Theme.on-surface.with-alpha(0.07) : root.base-bg.brighter(0.09))
+              : root.base-bg;
+
+    border-width: root.variant == "outlined" ? 1px : 0px;
+    border-color: touch.has-hover ? Theme.primary.with-alpha(0.65) : Theme.outline;
+
+    animate background { duration: 115ms; easing: ease-out; }
+    animate border-color { duration: 115ms; easing: ease-out; }
+
+    content-row := HorizontalLayout {
+        padding-left: root.has-icon ? (root.compact ? 11px : 14px) : (root.compact ? 13px : 16px);
+        padding-right: root.compact ? 13px : 16px;
+        spacing: 7px;
+        alignment: center;
+
+        if root.has-icon : Image {
+            width: root.compact ? 15px : 16px;
+            height: root.compact ? 15px : 16px;
+            y: (parent.height - self.height) / 2;
+            source: root.icon;
+            colorize: root.fg-color;
+            image-fit: ImageFit.contain;
+        }
+
+        Text {
+            text: root.text;
+            font-size: root.compact ? 12px : 12.5px;
+            font-weight: 600;
+            color: root.fg-color;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+            overflow: elide;
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+}
+
+// =============================================================================
+// Bounded Circular Material 3 Icon Button (Fixed Square, Never Stretches)
+// =============================================================================
+export component M3IconButton inherits Rectangle {
+    in property <image> icon;
+    in property <length> size: 34px;
+    in property <length> icon-size: 17px;
+    in property <bool> active: false;
+    in property <bool> filled-primary: false;
+    in property <bool> danger: false;
+    in property <bool> enabled: true;
+    callback clicked();
+
+    width: root.size;
+    height: root.size;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    border-radius: root.size / 2;
+    opacity: root.enabled ? 1.0 : 0.42;
+
+    property <color> icon-fg: root.filled-primary ? Theme.on-primary
+                            : root.danger ? (root.active ? Theme.on-error-container : Theme.error)
+                            : root.active ? Theme.on-primary-container
+                            : Theme.on-surface-variant;
+
+    background: root.filled-primary
+        ? (touch.pressed ? Theme.primary.darker(0.10) : touch.has-hover ? Theme.primary.brighter(0.08) : Theme.primary)
+        : root.danger && root.active
+            ? Theme.error-container
+            : root.active
+                ? (touch.has-hover ? Theme.primary-container.brighter(0.08) : Theme.primary-container)
+                : (touch.pressed ? Theme.on-surface.with-alpha(0.14) : touch.has-hover ? Theme.on-surface.with-alpha(0.08) : transparent);
+
+    border-width: root.active && !root.filled-primary ? 1px : 0px;
+    border-color: root.danger ? Theme.error.with-alpha(0.45) : Theme.primary.with-alpha(0.45);
+
+    animate background { duration: 115ms; easing: ease-out; }
+
+    Image {
+        width: root.icon-size;
+        height: root.icon-size;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        source: root.icon;
+        colorize: root.icon-fg;
+        image-fit: ImageFit.contain;
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+}
+
+// =============================================================================
+// Material 3 Filter Chip (Segmented / Filterable Desktop Chip)
+// =============================================================================
+export component M3FilterChip inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected: false;
+    callback clicked();
+
+    height: 32px;
+    vertical-stretch: 0;
+    horizontal-stretch: 0;
+    width: row.preferred-width;
+    border-radius: 8px;
+
+    background: root.selected
+        ? (touch.has-hover ? Theme.primary-container.brighter(0.08) : Theme.primary-container)
+        : (touch.has-hover ? Theme.surface-container-high : Theme.surface-container);
+
+    border-width: 1px;
+    border-color: root.selected ? Theme.primary.with-alpha(0.55) : Theme.outline-variant;
+
+    animate background { duration: 120ms; easing: ease-out; }
+    animate border-color { duration: 120ms; easing: ease-out; }
+
+    row := HorizontalLayout {
+        padding-left: root.selected ? 10px : 12px;
+        padding-right: 12px;
+        spacing: 5px;
+        alignment: center;
+
+        if root.selected : Image {
+            width: 14px;
+            height: 14px;
+            y: (parent.height - self.height) / 2;
+            source: @image-url("../assets/icons/check.svg");
+            colorize: Theme.on-primary-container;
+            image-fit: ImageFit.contain;
+        }
+
+        Text {
+            text: root.label;
+            font-size: 12px;
+            font-weight: root.selected ? 700 : 500;
+            color: root.selected ? Theme.on-primary-container : Theme.on-surface-variant;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// =============================================================================
+// Material 3 Pill Search Field (Bounded Height, Leading Search SVG, Clear X)
+// =============================================================================
+export component M3SearchField inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder: "Search...";
+    callback edited();
+    callback accepted(string);
+
+    public function focus-input() {
+        inner.focus();
+    }
+
+    height: 38px;
+    vertical-stretch: 0;
+    border-radius: 19px;
+    background: inner.has-focus ? Theme.surface-container-highest : Theme.surface-container-high;
+    border-width: inner.has-focus ? 1.5px : 1px;
+    border-color: inner.has-focus ? Theme.primary : Theme.outline-variant;
+
+    animate background { duration: 130ms; }
+    animate border-color { duration: 130ms; }
+
+    HorizontalLayout {
+        padding-left: 13px;
+        padding-right: 8px;
+        spacing: 8px;
+
+        Image {
+            width: 16px;
+            height: 16px;
+            y: (parent.height - self.height) / 2;
+            source: @image-url("../assets/icons/search.svg");
+            colorize: inner.has-focus ? Theme.primary : Theme.on-surface-muted;
+            image-fit: ImageFit.contain;
+        }
+
+        Rectangle {
+            horizontal-stretch: 1;
+            clip: true;
+
+            if root.text == "" : Text {
+                width: 100%;
+                height: 100%;
+                text: root.placeholder;
+                font-size: 12.5px;
+                color: Theme.on-surface-muted;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            inner := TextInput {
+                width: 100%;
+                height: 100%;
+                text <=> root.text;
+                font-size: 12.5px;
+                color: Theme.on-surface;
+                selection-background-color: Theme.primary.with-alpha(0.35);
+                selection-foreground-color: Theme.on-surface;
+                vertical-alignment: center;
+                single-line: true;
+                edited => { root.edited(); }
+                accepted => { root.accepted(root.text); }
+            }
+        }
+
+        if root.text != "" : M3IconButton {
+            size: 24px;
+            icon-size: 13px;
+            y: (parent.height - self.height) / 2;
+            icon: @image-url("../assets/icons/close.svg");
+            clicked => {
+                root.text = "";
+                root.edited();
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Material 3 Labeled Text Field (Never Loses Field Identity, Bounded Height)
+// =============================================================================
+export component M3LabeledInput inherits VerticalLayout {
+    in property <string> label: "";
+    in property <string> placeholder: "";
+    in-out property <string> text;
+    callback edited();
+    callback accepted(string);
+
+    spacing: 4px;
+    vertical-stretch: 0;
+
+    if root.label != "" : Text {
+        text: root.label;
+        font-size: 11px;
+        font-weight: 600;
+        color: field-input.has-focus ? Theme.primary : Theme.on-surface-variant;
+    }
+
+    Rectangle {
+        height: 38px;
+        vertical-stretch: 0;
+        border-radius: 10px;
+        background: field-input.has-focus ? Theme.surface-container-highest : Theme.surface-container-high;
+        border-width: field-input.has-focus ? 1.5px : 1px;
+        border-color: field-input.has-focus ? Theme.primary : Theme.outline-variant;
+
+        animate background { duration: 120ms; }
+        animate border-color { duration: 120ms; }
+
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 8px;
+            spacing: 6px;
+
+            Rectangle {
+                horizontal-stretch: 1;
+                clip: true;
+
+                if root.text == "" : Text {
+                    width: 100%;
+                    height: 100%;
+                    text: root.placeholder;
+                    font-size: 12.5px;
+                    color: Theme.on-surface-muted;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                field-input := TextInput {
+                    width: 100%;
+                    height: 100%;
+                    text <=> root.text;
+                    font-size: 12.5px;
+                    color: Theme.on-surface;
+                    selection-background-color: Theme.primary.with-alpha(0.35);
+                    selection-foreground-color: Theme.on-surface;
+                    vertical-alignment: center;
+                    single-line: true;
+                    edited => { root.edited(); }
+                    accepted => { root.accepted(root.text); }
+                }
+            }
+
+            if root.text != "" : M3IconButton {
+                size: 24px;
+                icon-size: 13px;
+                y: (parent.height - self.height) / 2;
+                icon: @image-url("../assets/icons/close.svg");
+                clicked => {
+                    root.text = "";
+                    root.edited();
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Accent Color Swatch (Material 3 Customization Picker)
+// =============================================================================
+export component AccentSwatch inherits Rectangle {
+    in property <color> swatch-color;
+    in property <string> label;
+    in property <bool> selected: false;
+    callback clicked();
+
+    height: 36px;
+    vertical-stretch: 0;
+    horizontal-stretch: 0;
+    width: row.preferred-width;
+    border-radius: 18px;
+    background: root.selected ? Theme.surface-container-highest : Theme.surface-container;
+    border-width: root.selected ? 1.5px : 1px;
+    border-color: root.selected ? root.swatch-color : Theme.outline-variant;
+
+    animate background { duration: 130ms; }
+    animate border-color { duration: 130ms; }
+
+    row := HorizontalLayout {
+        padding-left: 7px;
+        padding-right: 12px;
+        spacing: 8px;
+        alignment: center;
+
+        Rectangle {
+            width: 22px;
+            height: 22px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 11px;
+            background: root.swatch-color;
+
+            if root.selected : Image {
+                width: 13px;
+                height: 13px;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                source: @image-url("../assets/icons/check.svg");
+                colorize: #15141c;
+                image-fit: ImageFit.contain;
+            }
+        }
+
+        Text {
+            text: root.label;
+            font-size: 12px;
+            font-weight: root.selected ? 700 : 500;
+            color: root.selected ? Theme.on-surface : Theme.on-surface-variant;
+            vertical-alignment: center;
+        }
+    }
+
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// =============================================================================
+// Animated Live 4-Bar Audio Equalizer
+// =============================================================================
+export component EqualizerBars inherits Rectangle {
+    in property <bool> playing: false;
+    in property <float> level: 0.45;
+    in property <color> bar-color: Theme.primary;
+
+    width: 18px;
+    height: 16px;
+    vertical-stretch: 0;
+    horizontal-stretch: 0;
+
+    property <float> t: root.playing ? (animation-tick() / 110ms) : 0.0;
+    property <float> amp: root.playing ? max(0.28, min(1.0, root.level)) : 0.18;
+
+    HorizontalLayout {
+        spacing: 2px;
+        alignment: center;
+
+        Rectangle {
+            width: 3px;
+            property <float> h1: root.playing ? (0.30 + 0.70 * abs(Math.sin(root.t * 57deg)) * root.amp) : 0.22;
+            height: max(3px, 15px * self.h1);
+            y: parent.height - self.height;
+            border-radius: 1.5px;
+            background: root.bar-color;
+        }
+        Rectangle {
+            width: 3px;
+            property <float> h2: root.playing ? (0.35 + 0.65 * abs(Math.cos(root.t * 77deg)) * root.amp) : 0.35;
+            height: max(3px, 15px * self.h2);
+            y: parent.height - self.height;
+            border-radius: 1.5px;
+            background: root.bar-color;
+        }
+        Rectangle {
+            width: 3px;
+            property <float> h3: root.playing ? (0.28 + 0.72 * abs(Math.sin((root.t + 1.4) * 66deg)) * root.amp) : 0.25;
+            height: max(3px, 15px * self.h3);
+            y: parent.height - self.height;
+            border-radius: 1.5px;
+            background: root.bar-color;
+        }
+        Rectangle {
+            width: 3px;
+            property <float> h4: root.playing ? (0.25 + 0.68 * abs(Math.cos((root.t + 2.1) * 54deg)) * root.amp) : 0.20;
+            height: max(3px, 15px * self.h4);
+            y: parent.height - self.height;
+            border-radius: 1.5px;
+            background: root.bar-color;
+        }
+    }
+}
+
+// =============================================================================
+// Material 3 Navigation Rail Item (Vector SVG + Pill Highlight)
+// =============================================================================
 export component NavRailItem inherits Rectangle {
     in property <string> label;
-    in property <string> glyph;
+    in property <image> icon;
     in property <int> badge-count: 0;
     in property <bool> active: false;
     callback clicked();
 
-    height: 40px;
-    border-radius: 10px;
+    height: 42px;
+    vertical-stretch: 0;
+    border-radius: 21px;
     background: root.active
-        ? Palette.accent-background.with-alpha(0.20)
-        : (touch.has-hover ? Palette.foreground.with-alpha(0.07) : transparent);
-    border-width: root.active ? 1px : 0px;
-    border-color: Palette.accent-background.with-alpha(0.38);
+        ? Theme.primary-container
+        : (touch.has-hover ? Theme.on-surface.with-alpha(0.06) : transparent);
 
-    animate background { duration: 120ms; }
+    animate background { duration: 150ms; easing: ease-out; }
 
     HorizontalLayout {
-        padding-left: 12px;
-        padding-right: 10px;
-        spacing: 10px;
+        padding-left: 14px;
+        padding-right: 12px;
+        spacing: 11px;
 
-        Text {
-            text: root.glyph;
-            font-size: 14px;
-            font-weight: 700;
+        Image {
             width: 18px;
-            vertical-alignment: center;
-            horizontal-alignment: center;
-            color: root.active ? Palette.accent-background : Palette.foreground.with-alpha(0.75);
+            height: 18px;
+            y: (parent.height - self.height) / 2;
+            source: root.icon;
+            colorize: root.active ? Theme.primary : Theme.on-surface-variant;
+            image-fit: ImageFit.contain;
         }
 
         Text {
@@ -71,7 +594,7 @@ export component NavRailItem inherits Rectangle {
             vertical-alignment: center;
             horizontal-stretch: 1;
             overflow: elide;
-            color: root.active ? Palette.foreground : Palette.foreground.with-alpha(0.86);
+            color: root.active ? Theme.on-primary-container : Theme.on-surface-variant;
         }
 
         if root.badge-count > 0 : Rectangle {
@@ -79,11 +602,11 @@ export component NavRailItem inherits Rectangle {
             height: 20px;
             y: (parent.height - self.height) / 2;
             border-radius: 10px;
-            background: Palette.accent-background;
+            background: root.active ? Theme.primary : Theme.primary-container;
 
             badge-txt := Text {
                 text: root.badge-count > 99 ? "99+" : "\{root.badge-count}";
-                color: Palette.accent-foreground;
+                color: root.active ? Theme.on-primary : Theme.on-primary-container;
                 font-size: 11px;
                 font-weight: 700;
                 horizontal-alignment: center;
@@ -98,33 +621,35 @@ export component NavRailItem inherits Rectangle {
     }
 }
 
+// =============================================================================
+// Cover Artwork & Circular Artist Avatar
+// =============================================================================
 export component CoverArtwork inherits Rectangle {
     in property <image> cover;
     in property <bool> has-cover: false;
     in property <string> monogram: "♪";
     in property <int> accent-hue: 0;
-    in property <length> corner-radius: 10px;
+    in property <length> corner-radius: 12px;
 
     border-radius: root.corner-radius;
     clip: true;
-    background: root.accent-hue == 0 ? #332948
-              : root.accent-hue == 1 ? #1f3644
-              : root.accent-hue == 2 ? #2b3a30
-              : root.accent-hue == 3 ? #442b35
-              : root.accent-hue == 4 ? #3c3424
-              : #2b2d42;
+    background: root.accent-hue == 0 ? #2e2542
+              : root.accent-hue == 1 ? #1d3240
+              : root.accent-hue == 2 ? #23362c
+              : root.accent-hue == 3 ? #3e2731
+              : root.accent-hue == 4 ? #383020
+              : #25283d;
 
     if !root.has-cover : Rectangle {
-        // Subtle concentric vinyl groove rings for missing/loading cover art
         Rectangle {
-            width: parent.width * 0.68;
-            height: parent.height * 0.68;
+            width: parent.width * 0.70;
+            height: parent.height * 0.70;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             border-radius: self.width / 2;
             border-width: 1.5px;
-            border-color: #ffffff.with-alpha(0.11);
-            background: #000000.with-alpha(0.16);
+            border-color: #ffffff.with-alpha(0.10);
+            background: #000000.with-alpha(0.18);
         }
 
         Rectangle {
@@ -133,15 +658,15 @@ export component CoverArtwork inherits Rectangle {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             border-radius: self.width / 2;
-            background: Palette.accent-background.with-alpha(0.22);
+            background: Theme.primary.with-alpha(0.22);
             border-width: 1px;
-            border-color: Palette.accent-background.with-alpha(0.45);
+            border-color: Theme.primary.with-alpha(0.45);
 
             Text {
                 text: root.monogram;
-                font-size: 18px;
+                font-size: max(12px, parent.width * 0.36);
                 font-weight: 700;
-                color: #f3edf7;
+                color: #f4effa;
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
@@ -156,26 +681,73 @@ export component CoverArtwork inherits Rectangle {
     }
 }
 
+export component ArtistAvatar inherits Rectangle {
+    in property <image> avatar;
+    in property <bool> has-avatar: false;
+    in property <string> monogram: "♪";
+    in property <int> accent-hue: 0;
+    in property <bool> dimmed: false;
+    in property <length> size: 40px;
+
+    width: root.size;
+    height: root.size;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    border-radius: root.size / 2;
+    clip: true;
+    opacity: root.dimmed ? 0.52 : 1.0;
+
+    background: root.accent-hue == 0 ? Theme.primary-container
+              : root.accent-hue == 1 ? (Theme.dark-mode ? #173647 : #dbeafe)
+              : root.accent-hue == 2 ? (Theme.dark-mode ? #173a2e : #d1fae5)
+              : root.accent-hue == 3 ? (Theme.dark-mode ? #422934 : #fce7f3)
+              : root.accent-hue == 4 ? (Theme.dark-mode ? #3e321e : #fef3c7)
+              : (Theme.dark-mode ? #282b42 : #e0e7ff);
+
+    if !root.has-avatar : Text {
+        width: 100%;
+        height: 100%;
+        text: root.monogram;
+        font-size: root.size * 0.35;
+        font-weight: 700;
+        color: Theme.on-surface;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    if root.has-avatar : Image {
+        width: 100%;
+        height: 100%;
+        source: root.avatar;
+        image-fit: ImageFit.cover;
+    }
+}
+
+// =============================================================================
+// Release Card (Material 3 Tonal Card + Playing Indicator + Hover Actions)
+// =============================================================================
 export component ReleaseCard inherits Rectangle {
     in property <ReleaseCardData> data;
     in property <bool> selected: false;
+    in property <bool> playing-this-release: false;
 
     callback select-release(int);
     callback toggle-seen(int);
     callback dismiss-release(int);
     callback open-artist(int);
 
-    border-radius: 12px;
+    border-radius: 14px;
     background: root.selected
-        ? Palette.control-background.with-alpha(0.65)
-        : (card-touch.has-hover ? Palette.alternate-background.brighter(0.08) : Palette.alternate-background);
-    border-width: root.selected ? 2px : 1px;
-    border-color: root.selected
-        ? Palette.accent-background
-        : (card-touch.has-hover ? Palette.border.with-alpha(0.55) : Palette.border.with-alpha(0.22));
+        ? Theme.surface-container-high
+        : (card-touch.has-hover ? Theme.surface-container-high : Theme.surface-container);
+    border-width: (root.selected || root.playing-this-release) ? 2px : 1px;
+    border-color: (root.selected || root.playing-this-release)
+        ? Theme.primary
+        : (card-touch.has-hover ? Theme.outline : Theme.outline-variant);
     clip: true;
 
-    animate border-color { duration: 110ms; }
+    animate background { duration: 130ms; easing: ease-out; }
+    animate border-color { duration: 130ms; easing: ease-out; }
 
     card-touch := TouchArea {
         mouse-cursor: pointer;
@@ -186,7 +758,6 @@ export component ReleaseCard inherits Rectangle {
         padding: 10px;
         spacing: 8px;
 
-        // Square cover container
         art-box := Rectangle {
             height: root.width - 20px;
 
@@ -197,7 +768,7 @@ export component ReleaseCard inherits Rectangle {
                 has-cover: root.data.has-cover;
                 monogram: root.data.monogram;
                 accent-hue: root.data.accent-hue;
-                corner-radius: 8px;
+                corner-radius: 10px;
             }
 
             // Top-left release type badge
@@ -206,42 +777,59 @@ export component ReleaseCard inherits Rectangle {
                 y: 8px;
                 height: 20px;
                 width: type-txt.preferred-width + 12px;
-                border-radius: 5px;
-                background: #121116.with-alpha(0.82);
+                border-radius: 6px;
+                background: #101016.with-alpha(0.82);
 
                 type-txt := Text {
                     text: root.data.release-type;
                     font-size: 10px;
                     font-weight: 700;
                     letter-spacing: 0.5px;
-                    color: root.data.release-type == "ALBUM" ? #d0bcff
-                         : root.data.release-type == "EP" ? #89dceb
-                         : #f9e2af;
+                    color: root.data.release-type == "ALBUM" ? #e2d4ff
+                         : root.data.release-type == "EP" ? #9ae6f5
+                         : #fde68a;
                     horizontal-alignment: center;
                     vertical-alignment: center;
                 }
             }
 
-            // Top-right status indicator (UPCOMING / IN LIBRARY / NEW)
-            if root.data.upcoming || root.data.owned-locally || root.data.unseen : Rectangle {
+            // Top-right status indicator (PLAYING / UPCOMING / IN LIBRARY / NEW)
+            if root.playing-this-release : Rectangle {
+                x: parent.width - self.width - 8px;
+                y: 8px;
+                height: 22px;
+                width: 28px;
+                border-radius: 6px;
+                background: #101016.with-alpha(0.86);
+
+                EqualizerBars {
+                    x: 5px;
+                    y: 3px;
+                    playing: true;
+                    level: 0.7;
+                    bar-color: Theme.primary;
+                }
+            }
+
+            if !root.playing-this-release && (root.data.upcoming || root.data.owned-locally || root.data.unseen) : Rectangle {
                 x: parent.width - self.width - 8px;
                 y: 8px;
                 height: 20px;
                 width: flag-txt.preferred-width + 12px;
-                border-radius: 5px;
-                background: root.data.upcoming ? #1e4d3b.with-alpha(0.92)
-                          : root.data.owned-locally ? #323544.with-alpha(0.90)
-                          : Palette.accent-background;
+                border-radius: 6px;
+                background: root.data.upcoming ? Theme.success-container.with-alpha(0.95)
+                          : root.data.owned-locally ? #2d303e.with-alpha(0.92)
+                          : Theme.primary;
 
                 flag-txt := Text {
                     text: root.data.upcoming ? "UPCOMING"
-                        : root.data.owned-locally ? "IN LIBRARY"
+                        : root.data.owned-locally ? "OWNED"
                         : "NEW";
                     font-size: 10px;
                     font-weight: 700;
-                    color: root.data.upcoming ? #a6f4c5
-                         : root.data.owned-locally ? #cfd4e6
-                         : Palette.accent-foreground;
+                    color: root.data.upcoming ? Theme.on-success-container
+                         : root.data.owned-locally ? #d4d8ea
+                         : Theme.on-primary;
                     horizontal-alignment: center;
                     vertical-alignment: center;
                 }
@@ -250,27 +838,40 @@ export component ReleaseCard inherits Rectangle {
             // Desktop hover action pills (bottom-right of cover)
             HorizontalLayout {
                 x: parent.width - self.preferred-width - 8px;
-                y: parent.height - 32px;
+                y: parent.height - 34px;
                 height: 26px;
                 spacing: 6px;
                 opacity: (card-touch.has-hover || seen-touch.has-hover || dismiss-touch.has-hover || root.selected) ? 1.0 : 0.0;
-                animate opacity { duration: 110ms; }
+                animate opacity { duration: 130ms; easing: ease-out; }
 
                 Rectangle {
-                    width: seen-lbl.preferred-width + 14px;
+                    width: seen-row.preferred-width;
                     height: 26px;
-                    border-radius: 6px;
-                    background: #141318.with-alpha(0.88);
+                    border-radius: 13px;
+                    background: #14131c.with-alpha(0.90);
                     border-width: 1px;
-                    border-color: Palette.accent-background.with-alpha(0.6);
+                    border-color: Theme.primary.with-alpha(0.65);
 
-                    seen-lbl := Text {
-                        text: root.data.unseen ? "✓ Seen" : "↺ Unread";
-                        font-size: 11px;
-                        font-weight: 600;
-                        color: #f2eef8;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
+                    seen-row := HorizontalLayout {
+                        padding-left: 8px;
+                        padding-right: 9px;
+                        spacing: 4px;
+                        alignment: center;
+
+                        Image {
+                            width: 12px;
+                            height: 12px;
+                            y: (parent.height - self.height) / 2;
+                            source: @image-url("../assets/icons/check.svg");
+                            colorize: #f2eef8;
+                        }
+                        Text {
+                            text: root.data.unseen ? "Seen" : "Unread";
+                            font-size: 11px;
+                            font-weight: 600;
+                            color: #f2eef8;
+                            vertical-alignment: center;
+                        }
                     }
 
                     seen-touch := TouchArea {
@@ -283,18 +884,18 @@ export component ReleaseCard inherits Rectangle {
                 Rectangle {
                     width: 26px;
                     height: 26px;
-                    border-radius: 6px;
-                    background: #141318.with-alpha(0.88);
+                    border-radius: 13px;
+                    background: #14131c.with-alpha(0.90);
                     border-width: 1px;
-                    border-color: #ffffff.with-alpha(0.22);
+                    border-color: #ffffff.with-alpha(0.24);
 
-                    Text {
-                        text: "✕";
-                        font-size: 11px;
-                        font-weight: 700;
-                        color: #f2b8b5;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
+                    Image {
+                        width: 13px;
+                        height: 13px;
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        source: @image-url("../assets/icons/close.svg");
+                        colorize: #f2b8b5;
                     }
 
                     dismiss-touch := TouchArea {
@@ -306,16 +907,15 @@ export component ReleaseCard inherits Rectangle {
             }
         }
 
-        // Metadata stack
         VerticalLayout {
             spacing: 3px;
-            vertical-stretch: 1;
+            alignment: start;
 
             Text {
                 text: root.data.title;
                 font-size: 13px;
                 font-weight: 700;
-                color: Palette.foreground;
+                color: Theme.on-surface;
                 overflow: elide;
             }
 
@@ -327,7 +927,7 @@ export component ReleaseCard inherits Rectangle {
                     text: root.data.artist-name;
                     font-size: 12px;
                     font-weight: 500;
-                    color: artist-touch.has-hover ? Palette.accent-background : Palette.foreground.with-alpha(0.75);
+                    color: artist-touch.has-hover ? Theme.primary : Theme.on-surface-variant;
                     overflow: elide;
                     vertical-alignment: center;
                 }
@@ -342,7 +942,7 @@ export component ReleaseCard inherits Rectangle {
                 Text {
                     text: root.data.release-date != "" ? root.data.release-date : "Date TBA";
                     font-size: 11px;
-                    color: Palette.foreground.with-alpha(0.56);
+                    color: Theme.on-surface-muted;
                     vertical-alignment: center;
                     horizontal-stretch: 1;
                     overflow: elide;
@@ -351,7 +951,7 @@ export component ReleaseCard inherits Rectangle {
                 if root.data.track-count > 0 : Text {
                     text: "\{root.data.track-count} trk";
                     font-size: 11px;
-                    color: Palette.foreground.with-alpha(0.50);
+                    color: Theme.on-surface-muted;
                     vertical-alignment: center;
                 }
             }
@@ -359,91 +959,159 @@ export component ReleaseCard inherits Rectangle {
     }
 }
 
+// =============================================================================
+// Track Row with Native In-App 30s Preview Trigger & Live Equalizer
+// =============================================================================
 export component TrackRow inherits Rectangle {
     in property <TrackRowData> track;
-    callback play-preview(string);
+    in property <bool> is-current-track: false;
+    in property <bool> is-playing: false;
+    in property <bool> is-buffering: false;
+    in property <float> audio-level: 0.5;
+    callback play-preview(TrackRowData);
 
-    height: 36px;
-    border-radius: 6px;
-    background: row-touch.has-hover ? Palette.foreground.with-alpha(0.05) : transparent;
+    height: 38px;
+    vertical-stretch: 0;
+    border-radius: 8px;
+    background: root.is-current-track
+        ? Theme.primary-container.with-alpha(0.55)
+        : (row-touch.has-hover ? Theme.on-surface.with-alpha(0.05) : transparent);
 
-    row-touch := TouchArea {}
+    animate background { duration: 120ms; }
+
+    row-touch := TouchArea {
+        mouse-cursor: root.track.has-preview ? pointer : default;
+        clicked => {
+            if (root.track.has-preview) {
+                root.play-preview(root.track);
+            }
+        }
+    }
 
     HorizontalLayout {
         padding-left: 8px;
         padding-right: 8px;
         spacing: 8px;
 
-        Text {
-            text: root.track.number-label;
-            width: 28px;
-            font-size: 11px;
-            color: Palette.foreground.with-alpha(0.50);
-            vertical-alignment: center;
-            horizontal-alignment: right;
+        Rectangle {
+            width: 26px;
+            height: 100%;
+            horizontal-stretch: 0;
+
+            if root.is-current-track && root.is-playing : EqualizerBars {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                playing: true;
+                level: root.audio-level;
+                bar-color: Theme.primary;
+            }
+
+            if !(root.is-current-track && root.is-playing) : Text {
+                width: 100%;
+                height: 100%;
+                text: root.track.number-label;
+                font-size: 11px;
+                font-weight: root.is-current-track ? 700 : 500;
+                color: root.is-current-track ? Theme.primary : Theme.on-surface-muted;
+                vertical-alignment: center;
+                horizontal-alignment: right;
+            }
         }
 
         Text {
             text: root.track.title;
-            font-size: 12px;
-            font-weight: 500;
-            color: Palette.foreground;
+            font-size: 12.5px;
+            font-weight: root.is-current-track ? 700 : 500;
+            color: root.is-current-track ? Theme.primary : Theme.on-surface;
             vertical-alignment: center;
             horizontal-stretch: 1;
             overflow: elide;
         }
 
         if root.track.has-preview : Rectangle {
-            width: 58px;
-            height: 22px;
+            width: 62px;
+            height: 24px;
             y: (parent.height - self.height) / 2;
-            border-radius: 5px;
-            background: prev-touch.has-hover
-                ? Palette.accent-background.with-alpha(0.28)
-                : Palette.control-background;
+            horizontal-stretch: 0;
+            border-radius: 12px;
+            background: root.is-current-track
+                ? Theme.primary
+                : (prev-touch.has-hover ? Theme.primary-container : Theme.secondary-container);
 
-            Text {
-                text: "▶ 30s";
-                font-size: 10px;
-                font-weight: 700;
-                color: Palette.control-foreground;
-                horizontal-alignment: center;
-                vertical-alignment: center;
+            animate background { duration: 115ms; }
+
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                spacing: 4px;
+                alignment: center;
+
+                Image {
+                    width: 11px;
+                    height: 11px;
+                    y: (parent.height - self.height) / 2;
+                    source: (root.is-current-track && root.is-playing)
+                        ? @image-url("../assets/icons/pause.svg")
+                        : @image-url("../assets/icons/play.svg");
+                    colorize: root.is-current-track
+                        ? Theme.on-primary
+                        : (prev-touch.has-hover ? Theme.on-primary-container : Theme.on-secondary-container);
+                }
+
+                Text {
+                    text: (root.is-current-track && root.is-buffering) ? "..." : "30s";
+                    font-size: 10.5px;
+                    font-weight: 700;
+                    color: root.is-current-track
+                        ? Theme.on-primary
+                        : (prev-touch.has-hover ? Theme.on-primary-container : Theme.on-secondary-container);
+                    vertical-alignment: center;
+                }
             }
 
             prev-touch := TouchArea {
                 mouse-cursor: pointer;
-                clicked => { root.play-preview(root.track.preview-url); }
+                clicked => { root.play-preview(root.track); }
             }
         }
 
         Text {
             text: root.track.duration;
-            width: 38px;
+            width: 36px;
+            horizontal-stretch: 0;
             font-size: 11px;
-            color: Palette.foreground.with-alpha(0.56);
+            color: Theme.on-surface-muted;
             vertical-alignment: center;
             horizontal-alignment: right;
         }
     }
 }
 
+// =============================================================================
+// Uncrowded, Balanced Material 3 Tracked Artist List Row
+// =============================================================================
 export component ArtistListRow inherits Rectangle {
     in property <ArtistRowData> artist;
     in property <bool> selected: false;
 
     callback select-artist(int);
-    callback quick-check(int);
+    callback view-drops(int);
     callback toggle-mute(int);
     callback toggle-ignore(int);
 
-    height: 62px;
-    border-radius: 10px;
+    height: 60px;
+    vertical-stretch: 0;
+    border-radius: 12px;
     background: root.selected
-        ? Palette.control-background.with-alpha(0.65)
-        : (row-touch.has-hover ? Palette.alternate-background.brighter(0.06) : Palette.alternate-background);
+        ? Theme.surface-container-high
+        : (row-touch.has-hover ? Theme.surface-container-high : Theme.surface-container);
     border-width: root.selected ? 1.5px : 1px;
-    border-color: root.selected ? Palette.accent-background : Palette.border.with-alpha(0.20);
+    border-color: root.selected
+        ? Theme.primary
+        : (row-touch.has-hover ? Theme.outline : Theme.outline-variant);
+
+    animate background { duration: 120ms; easing: ease-out; }
+    animate border-color { duration: 120ms; easing: ease-out; }
 
     row-touch := TouchArea {
         mouse-cursor: pointer;
@@ -451,30 +1119,21 @@ export component ArtistListRow inherits Rectangle {
     }
 
     HorizontalLayout {
-        padding-left: 12px;
+        padding-left: 14px;
         padding-right: 12px;
-        spacing: 12px;
+        spacing: 13px;
 
-        // Monogram avatar
-        Rectangle {
-            width: 38px;
-            height: 38px;
+        ArtistAvatar {
             y: (parent.height - self.height) / 2;
-            border-radius: 19px;
-            background: root.artist.status == "tracked"
-                ? Palette.accent-background.with-alpha(0.22)
-                : Palette.foreground.with-alpha(0.09);
-
-            Text {
-                text: root.artist.monogram;
-                font-size: 14px;
-                font-weight: 700;
-                color: root.artist.status == "tracked" ? Palette.accent-background : Palette.foreground.with-alpha(0.55);
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
+            size: 40px;
+            avatar: root.artist.avatar;
+            has-avatar: root.artist.has-avatar;
+            monogram: root.artist.monogram;
+            accent-hue: root.artist.accent-hue;
+            dimmed: root.artist.status != "tracked";
         }
 
+        // Primary Name & Clean Subtitle Column
         VerticalLayout {
             alignment: center;
             spacing: 3px;
@@ -482,99 +1141,384 @@ export component ArtistListRow inherits Rectangle {
 
             HorizontalLayout {
                 spacing: 8px;
+                alignment: start;
+
                 Text {
                     text: root.artist.name;
                     font-size: 14px;
                     font-weight: 700;
                     color: root.artist.status == "ignored"
-                        ? Palette.foreground.with-alpha(0.48)
-                        : Palette.foreground;
+                        ? Theme.on-surface-muted
+                        : Theme.on-surface;
                     overflow: elide;
                     vertical-alignment: center;
                 }
 
-                if root.artist.disambiguation != "" : Text {
-                    text: "· \{root.artist.disambiguation}";
-                    font-size: 11px;
-                    color: Palette.foreground.with-alpha(0.52);
-                    overflow: elide;
-                    vertical-alignment: center;
-                    horizontal-stretch: 1;
+                if root.artist.is-manual : TonalBadge {
+                    y: (parent.height - self.height) / 2;
+                    label: "MANUAL";
+                    badge-bg: Theme.primary-container.with-alpha(0.65);
+                    badge-fg: Theme.on-primary-container;
+                }
+
+                if root.artist.status == "muted" : TonalBadge {
+                    y: (parent.height - self.height) / 2;
+                    label: "MUTED";
+                    badge-bg: Theme.warning-container;
+                    badge-fg: Theme.on-warning-container;
+                }
+
+                if root.artist.status == "ignored" : TonalBadge {
+                    y: (parent.height - self.height) / 2;
+                    label: "IGNORED";
+                    badge-bg: Theme.error-container;
+                    badge-fg: Theme.on-error-container;
                 }
             }
 
             HorizontalLayout {
-                spacing: 10px;
+                spacing: 6px;
+                alignment: start;
+
                 Text {
-                    text: root.artist.source-label;
-                    font-size: 11px;
-                    color: Palette.foreground.with-alpha(0.62);
-                    vertical-alignment: center;
-                }
-                Text {
-                    text: root.artist.last-checked;
-                    font-size: 11px;
-                    color: Palette.foreground.with-alpha(0.45);
+                    text: root.artist.disambiguation != ""
+                        ? "\{root.artist.disambiguation}  ·  \{root.artist.source-label}"
+                        : root.artist.source-label;
+                    font-size: 11.5px;
+                    color: Theme.on-surface-variant;
+                    overflow: elide;
                     vertical-alignment: center;
                 }
             }
         }
 
+        // Right-aligned compact metadata & non-stretching action cluster
         if root.artist.unseen-count > 0 : Rectangle {
-            width: 62px;
-            height: 22px;
+            width: drops-txt.preferred-width + 16px;
+            height: 24px;
             y: (parent.height - self.height) / 2;
-            border-radius: 11px;
-            background: Palette.accent-background.with-alpha(0.22);
+            horizontal-stretch: 0;
+            border-radius: 12px;
+            background: drops-touch.has-hover ? Theme.primary : Theme.primary-container;
 
-            Text {
+            animate background { duration: 115ms; }
+
+            drops-txt := Text {
                 text: "\{root.artist.unseen-count} new";
                 font-size: 11px;
                 font-weight: 700;
-                color: Palette.accent-background;
+                color: drops-touch.has-hover ? Theme.on-primary : Theme.on-primary-container;
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
+
+            drops-touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.view-drops(root.artist.id); }
+            }
         }
 
-        TonalBadge {
-            y: (parent.height - self.height) / 2;
-            label: root.artist.status == "tracked" ? "TRACKED"
-                 : root.artist.status == "muted" ? "MUTED"
-                 : "IGNORED";
-            badge-bg: root.artist.status == "tracked" ? Palette.control-background
-                    : root.artist.status == "muted" ? #4a3f28
-                    : #432b2e;
-            badge-fg: root.artist.status == "tracked" ? Palette.control-foreground
-                    : root.artist.status == "muted" ? #f7d996
-                    : #f2b8b5;
+        Text {
+            text: root.artist.last-checked;
+            width: 86px;
+            horizontal-stretch: 0;
+            font-size: 11px;
+            color: Theme.on-surface-muted;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            overflow: elide;
         }
 
-        Button {
-            height: 34px;
-            y: (parent.height - self.height) / 2;
-            text: root.artist.status == "muted" ? "Unmute" : "Mute";
-            clicked => { root.toggle-mute(root.artist.id); }
-        }
+        // Compact M3 Icon Toggle Buttons (Mute & Ignore — clean & uncrowded!)
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 0;
 
-        Button {
-            height: 34px;
-            y: (parent.height - self.height) / 2;
-            text: root.artist.status == "ignored" ? "Restore" : "Ignore";
-            clicked => { root.toggle-ignore(root.artist.id); }
+            HorizontalLayout {
+                spacing: 4px;
+                height: 32px;
+
+                M3IconButton {
+                    size: 32px;
+                    icon-size: 16px;
+                    active: root.artist.status == "muted";
+                    icon: root.artist.status == "muted"
+                        ? @image-url("../assets/icons/volume-off.svg")
+                        : @image-url("../assets/icons/volume-on.svg");
+                    clicked => { root.toggle-mute(root.artist.id); }
+                }
+
+                M3IconButton {
+                    size: 32px;
+                    icon-size: 16px;
+                    danger: root.artist.status == "ignored";
+                    active: root.artist.status == "ignored";
+                    icon: @image-url("../assets/icons/eye-off.svg");
+                    clicked => { root.toggle-ignore(root.artist.id); }
+                }
+            }
         }
     }
 }
 
+// =============================================================================
+// Docked In-App 30s Audio Preview Mini-Player Bar
+// =============================================================================
+export component PreviewMiniPlayer inherits Rectangle {
+    in property <bool> active: false;
+    in property <bool> playing: false;
+    in property <bool> buffering: false;
+    in property <string> track-title: "";
+    in property <string> artist-name: "";
+    in property <string> release-title: "";
+    in property <image> cover;
+    in property <bool> has-cover: false;
+    in property <string> monogram: "♪";
+    in property <int> accent-hue: 0;
+    in property <float> progress: 0.0;
+    in property <string> elapsed-label: "0:00";
+    in property <string> duration-label: "0:30";
+    in property <float> level: 0.0;
+    in property <int> volume-pct: 80;
+
+    callback toggle-pause();
+    callback seek(float);
+    callback volume-changed(int);
+    callback stop-preview();
+    callback open-playing-release();
+
+    height: root.active ? 72px : 0px;
+    vertical-stretch: 0;
+    clip: true;
+    background: Theme.surface-container-high;
+
+    animate height { duration: 200ms; easing: cubic-bezier(0.2, 0.0, 0.0, 1.0); }
+
+    // Top accent border line
+    Rectangle {
+        x: 0px;
+        y: 0px;
+        width: 100%;
+        height: 1px;
+        background: Theme.outline;
+    }
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 14px;
+
+        // Track Artwork + Info (clickable to jump to release)
+        Rectangle {
+            min-width: 180px;
+            max-width: 290px;
+            horizontal-stretch: 1;
+
+            HorizontalLayout {
+                spacing: 11px;
+
+                CoverArtwork {
+                    width: 46px;
+                    height: 46px;
+                    y: (parent.height - self.height) / 2;
+                    cover: root.cover;
+                    has-cover: root.has-cover;
+                    monogram: root.monogram;
+                    accent-hue: root.accent-hue;
+                    corner-radius: 10px;
+                }
+
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 2px;
+                    horizontal-stretch: 1;
+
+                    HorizontalLayout {
+                        spacing: 7px;
+                        EqualizerBars {
+                            y: (parent.height - self.height) / 2;
+                            playing: root.playing;
+                            level: root.level;
+                            bar-color: Theme.primary;
+                        }
+                        Text {
+                            text: root.track-title;
+                            font-size: 13px;
+                            font-weight: 700;
+                            color: Theme.on-surface;
+                            overflow: elide;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                    }
+
+                    Text {
+                        text: root.release-title != ""
+                            ? "\{root.artist-name} · \{root.release-title}"
+                            : root.artist-name;
+                        font-size: 11.5px;
+                        color: Theme.on-surface-variant;
+                        overflow: elide;
+                    }
+                }
+            }
+
+            TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.open-playing-release(); }
+            }
+        }
+
+        // Center Transport + Interactive Seek Bar
+        HorizontalLayout {
+            horizontal-stretch: 2;
+            spacing: 12px;
+
+            M3IconButton {
+                size: 40px;
+                icon-size: 18px;
+                y: (parent.height - self.height) / 2;
+                filled-primary: true;
+                icon: root.playing
+                    ? @image-url("../assets/icons/pause.svg")
+                    : @image-url("../assets/icons/play.svg");
+                clicked => { root.toggle-pause(); }
+            }
+
+            Text {
+                text: root.buffering ? "..." : root.elapsed-label;
+                width: 32px;
+                font-size: 11px;
+                font-weight: 600;
+                color: Theme.on-surface-variant;
+                vertical-alignment: center;
+                horizontal-alignment: right;
+            }
+
+            // Interactive Seek Track
+            seek-area := Rectangle {
+                horizontal-stretch: 1;
+                height: 28px;
+                y: (parent.height - self.height) / 2;
+
+                Rectangle {
+                    width: 100%;
+                    height: 6px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 3px;
+                    background: Theme.surface-container-highest;
+
+                    Rectangle {
+                        width: parent.width * max(0.0, min(1.0, root.progress));
+                        height: 100%;
+                        border-radius: 3px;
+                        background: Theme.primary;
+                    }
+                }
+
+                // Scrubber thumb
+                Rectangle {
+                    width: seek-touch.has-hover ? 14px : 10px;
+                    height: self.width;
+                    x: max(0px, min(parent.width - self.width, parent.width * max(0.0, min(1.0, root.progress)) - self.width / 2));
+                    y: (parent.height - self.height) / 2;
+                    border-radius: self.width / 2;
+                    background: Theme.primary;
+
+                    animate width { duration: 100ms; }
+                }
+
+                seek-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.seek(max(0.0, min(1.0, self.mouse-x / parent.width)));
+                    }
+                }
+            }
+
+            Text {
+                text: root.duration-label;
+                width: 32px;
+                font-size: 11px;
+                color: Theme.on-surface-muted;
+                vertical-alignment: center;
+            }
+        }
+
+        // Right Volume Scrubber + Stop/Dismiss
+        HorizontalLayout {
+            spacing: 8px;
+            horizontal-stretch: 0;
+
+            M3IconButton {
+                size: 32px;
+                icon-size: 16px;
+                y: (parent.height - self.height) / 2;
+                icon: root.volume-pct == 0
+                    ? @image-url("../assets/icons/volume-off.svg")
+                    : @image-url("../assets/icons/volume-on.svg");
+                clicked => {
+                    root.volume-changed(root.volume-pct == 0 ? 80 : 0);
+                }
+            }
+
+            vol-bar := Rectangle {
+                width: 78px;
+                height: 26px;
+                y: (parent.height - self.height) / 2;
+
+                Rectangle {
+                    width: 100%;
+                    height: 5px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 2.5px;
+                    background: Theme.surface-container-highest;
+
+                    Rectangle {
+                        width: parent.width * (root.volume-pct / 100.0);
+                        height: 100%;
+                        border-radius: 2.5px;
+                        background: Theme.on-surface-variant;
+                    }
+                }
+
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.volume-changed(Math.round(max(0.0, min(100.0, (self.mouse-x / parent.width) * 100.0))));
+                    }
+                    moved => {
+                        if (self.pressed) {
+                            root.volume-changed(Math.round(max(0.0, min(100.0, (self.mouse-x / parent.width) * 100.0))));
+                        }
+                    }
+                }
+            }
+
+            M3IconButton {
+                size: 32px;
+                icon-size: 15px;
+                y: (parent.height - self.height) / 2;
+                icon: @image-url("../assets/icons/close.svg");
+                clicked => { root.stop-preview(); }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Search Candidate, Local Album, Folder Row & Section Card
+// =============================================================================
 export component SearchCandidateRow inherits Rectangle {
     in property <SearchCandidateRowData> candidate;
     callback add-candidate(int);
 
-    height: 46px;
-    border-radius: 8px;
-    background: Palette.alternate-background;
+    height: 48px;
+    vertical-stretch: 0;
+    border-radius: 10px;
+    background: Theme.surface-container-low;
     border-width: 1px;
-    border-color: Palette.border.with-alpha(0.24);
+    border-color: Theme.outline-variant;
 
     HorizontalLayout {
         padding-left: 12px;
@@ -590,13 +1534,13 @@ export component SearchCandidateRow inherits Rectangle {
                 text: root.candidate.name;
                 font-size: 13px;
                 font-weight: 700;
-                color: Palette.foreground;
+                color: Theme.on-surface;
                 overflow: elide;
             }
             if root.candidate.subtitle != "" : Text {
                 text: root.candidate.subtitle;
                 font-size: 11px;
-                color: Palette.foreground.with-alpha(0.60);
+                color: Theme.on-surface-variant;
                 overflow: elide;
             }
         }
@@ -606,11 +1550,13 @@ export component SearchCandidateRow inherits Rectangle {
             label: root.candidate.source-badge;
         }
 
-        Button {
-            height: 32px;
+        M3Button {
             y: (parent.height - self.height) / 2;
+            compact: true;
+            variant: "filled";
+            has-icon: true;
+            icon: @image-url("../assets/icons/plus.svg");
             text: "Track";
-            primary: true;
             clicked => { root.add-candidate(root.candidate.index); }
         }
     }
@@ -620,13 +1566,14 @@ export component LocalAlbumItem inherits Rectangle {
     in property <LocalAlbumRowData> album;
 
     height: 44px;
-    border-radius: 8px;
-    background: Palette.background.with-alpha(0.55);
+    vertical-stretch: 0;
+    border-radius: 10px;
+    background: Theme.surface-container;
     border-width: 1px;
-    border-color: Palette.border.with-alpha(0.18);
+    border-color: Theme.outline-variant;
 
     HorizontalLayout {
-        padding-left: 10px;
+        padding-left: 12px;
         padding-right: 10px;
         spacing: 8px;
 
@@ -637,15 +1584,15 @@ export component LocalAlbumItem inherits Rectangle {
 
             Text {
                 text: root.album.title;
-                font-size: 12px;
+                font-size: 12.5px;
                 font-weight: 600;
-                color: Palette.foreground;
+                color: Theme.on-surface;
                 overflow: elide;
             }
             Text {
                 text: root.album.track-count-label;
-                font-size: 10px;
-                color: Palette.foreground.with-alpha(0.54);
+                font-size: 10.5px;
+                color: Theme.on-surface-muted;
                 overflow: elide;
             }
         }
@@ -661,16 +1608,26 @@ export component FolderItemRow inherits Rectangle {
     in property <FolderRowData> folder;
     callback remove-folder(int);
 
-    height: 52px;
-    border-radius: 8px;
-    background: Palette.background.with-alpha(0.55);
+    height: 54px;
+    vertical-stretch: 0;
+    border-radius: 10px;
+    background: Theme.surface-container-low;
     border-width: 1px;
-    border-color: Palette.border.with-alpha(0.22);
+    border-color: Theme.outline-variant;
 
     HorizontalLayout {
         padding-left: 12px;
         padding-right: 10px;
         spacing: 12px;
+
+        Image {
+            width: 18px;
+            height: 18px;
+            y: (parent.height - self.height) / 2;
+            source: @image-url("../assets/icons/folder.svg");
+            colorize: Theme.primary;
+            image-fit: ImageFit.contain;
+        }
 
         VerticalLayout {
             alignment: center;
@@ -681,20 +1638,23 @@ export component FolderItemRow inherits Rectangle {
                 text: root.folder.path;
                 font-size: 13px;
                 font-weight: 600;
-                color: Palette.foreground;
+                color: Theme.on-surface;
                 overflow: elide;
             }
             Text {
                 text: root.folder.stats-label;
                 font-size: 11px;
-                color: Palette.foreground.with-alpha(0.58);
+                color: Theme.on-surface-variant;
                 overflow: elide;
             }
         }
 
-        Button {
-            height: 34px;
+        M3Button {
             y: (parent.height - self.height) / 2;
+            compact: true;
+            variant: "outlined";
+            has-icon: true;
+            icon: @image-url("../assets/icons/trash.svg");
             text: "Remove";
             clicked => { root.remove-folder(root.folder.id); }
         }
@@ -705,27 +1665,30 @@ export component SectionCard inherits Rectangle {
     in property <string> title;
     in property <string> subtitle: "";
 
-    border-radius: 12px;
-    background: Palette.alternate-background;
+    vertical-stretch: 0;
+    border-radius: 16px;
+    background: Theme.surface-container;
     border-width: 1px;
-    border-color: Palette.border.with-alpha(0.24);
+    border-color: Theme.outline-variant;
 
     VerticalLayout {
-        padding: 18px;
-        spacing: 12px;
+        padding: 20px;
+        spacing: 14px;
+        alignment: start;
 
         VerticalLayout {
             spacing: 3px;
+            alignment: start;
             Text {
                 text: root.title;
                 font-size: 15px;
                 font-weight: 700;
-                color: Palette.foreground;
+                color: Theme.on-surface;
             }
             if root.subtitle != "" : Text {
                 text: root.subtitle;
                 font-size: 12px;
-                color: Palette.foreground.with-alpha(0.62);
+                color: Theme.on-surface-variant;
                 wrap: word-wrap;
             }
         }

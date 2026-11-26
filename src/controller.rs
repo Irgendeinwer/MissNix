@@ -9,31 +9,42 @@ use std::time::{Duration, Instant};
 
 use missnix_core::normalize::{days_ago_iso_utc, today_iso_utc};
 use missnix_core::{
-    scan_library_folders, AppPaths, AppSettings, Artist, ArtistSearchCandidate, ArtistSource,
-    ArtistStatus, CoreError, Database, FeedQuery, FeedSort, ProgressEvent, ProviderMode, Release,
-    ReleaseState, ReleaseTrack, ReleaseType, SyncEngine,
+    is_deezer_preview_url_expired, scan_library_folders_with_options, AppPaths, AppSettings,
+    Artist, ArtistDiscoveryMode, ArtistSearchCandidate, ArtistSource, ArtistStatus, CoreError,
+    Database, FeedQuery, FeedSort, ProgressEvent, ProviderMode, Release, ReleaseState,
+    ReleaseTrack, ReleaseType, ScanOptions, SyncEngine,
 };
 use slint::{
     ComponentHandle, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, Timer,
     TimerMode, VecModel, Weak,
 };
 
+use crate::audio_player::{AudioPreviewHandle, PreviewRequest, PreviewUiUpdate};
 use crate::folder_picker::pick_music_folder;
 use crate::{
     AppWindow, ArtistRowData, FolderRowData, LocalAlbumRowData, ReleaseCardData,
     SearchCandidateRowData, TrackRowData,
 };
 
+pub enum ImageJob {
+    ReleaseCover(Release),
+    ArtistAvatar(Artist),
+}
+
 pub struct UiState {
     pub paths: AppPaths,
     pub db: Database,
     pub engine: SyncEngine,
     pub settings: AppSettings,
+    pub audio: AudioPreviewHandle,
     pub cancel_flag: Arc<AtomicBool>,
-    pub cover_tx: mpsc::Sender<Release>,
+    pub image_tx: mpsc::Sender<ImageJob>,
     pub decoded_covers: HashMap<i64, Image>,
     pub inflight_covers: HashSet<i64>,
+    pub decoded_avatars: HashMap<i64, Image>,
+    pub inflight_avatars: HashSet<i64>,
     pub release_model: Rc<VecModel<ReleaseCardData>>,
+    pub artist_model: Rc<VecModel<ArtistRowData>>,
     pub last_auto_check: Instant,
 }
 
@@ -45,39 +56,70 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
     let settings = db.load_settings().map_err(|e| e.to_string())?;
     let engine = SyncEngine::new(paths.cover_cache_dir.clone());
 
-    let (cover_tx, cover_rx) = mpsc::channel::<Release>();
+    let (image_tx, image_rx) = mpsc::channel::<ImageJob>();
     let release_model = Rc::new(VecModel::<ReleaseCardData>::default());
+    let artist_model = Rc::new(VecModel::<ArtistRowData>::default());
     app.set_releases(ModelRc::from(release_model.clone()));
+    app.set_artists(ModelRc::from(artist_model.clone()));
+
+    let weak_audio = app.as_weak();
+    let audio = AudioPreviewHandle::spawn(
+        paths.clone(),
+        engine.clone(),
+        settings.preview_volume,
+        move |upd: PreviewUiUpdate| {
+            let w = weak_audio.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                let Some(win) = w.upgrade() else { return };
+                win.set_preview_active(upd.active);
+                win.set_preview_playing(upd.playing);
+                win.set_preview_buffering(upd.buffering);
+                win.set_preview_release_id(upd.release_id);
+                win.set_preview_disc_number(upd.disc_number);
+                win.set_preview_track_number(upd.track_number);
+                win.set_preview_track_title(upd.track_title.into());
+                win.set_preview_artist_name(upd.artist_name.into());
+                win.set_preview_release_title(upd.release_title.into());
+                win.set_preview_progress(upd.progress);
+                win.set_preview_elapsed_label(upd.elapsed_label.into());
+                win.set_preview_duration_label(upd.duration_label.into());
+                win.set_preview_level(upd.level);
+
+                if let Some(err) = upd.error {
+                    win.set_status_is_warning(true);
+                    win.set_status_banner_text(err.into());
+                }
+            });
+        },
+    );
 
     let state = Rc::new(RefCell::new(UiState {
         paths: paths.clone(),
         db,
         engine: engine.clone(),
         settings: settings.clone(),
+        audio,
         cancel_flag: Arc::new(AtomicBool::new(false)),
-        cover_tx,
+        image_tx,
         decoded_covers: HashMap::new(),
         inflight_covers: HashSet::new(),
+        decoded_avatars: HashMap::new(),
+        inflight_avatars: HashSet::new(),
         release_model,
+        artist_model,
         last_auto_check: Instant::now(),
     }));
 
-    // Apply persisted preferences to UI controls & Material theme
+    // Apply persisted preferences to UI controls & Material 3 theme
     apply_settings_to_window(app, &settings);
 
     // Initial fast synchronous hydrate from SQLite
     refresh_folders_and_stats(app, &state.borrow());
     refresh_feed(app, &mut state.borrow_mut());
-    refresh_artists(app, &state.borrow());
+    refresh_artists(app, &mut state.borrow_mut());
 
-    // Start persistent background cover-art downloader & RGBA8 decoder worker
-    spawn_cover_worker(
-        paths.db_path.clone(),
-        engine,
-        cover_rx,
-        app.as_weak(),
-        &state,
-    );
+    // Start persistent background cover-art & artist-avatar downloader/decoder worker
+    spawn_image_worker(paths, engine, image_rx, app.as_weak(), &state);
 
     // -------------------------------------------------------------------------
     // Navigation & Global Task Callbacks
@@ -91,7 +133,7 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
             let mut guard = st.borrow_mut();
             match view_idx {
                 0 | 1 => refresh_feed(&win, &mut guard),
-                2 => refresh_artists(&win, &guard),
+                2 => refresh_artists(&win, &mut guard),
                 3 => refresh_folders_and_stats(&win, &guard),
                 _ => {}
             }
@@ -118,6 +160,89 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
         let st = state.clone();
         app.on_check_all_releases(move || {
             start_release_sync(&weak, &st, None);
+        });
+    }
+
+    // -------------------------------------------------------------------------
+    // Native In-App 30s Audio Preview Callbacks
+    // -------------------------------------------------------------------------
+    {
+        let weak = app.as_weak();
+        let st = state.clone();
+        app.on_play_track_preview(move |rel_id, disc_num, track_num| {
+            let Some(win) = weak.upgrade() else { return };
+            let guard = st.borrow();
+            let Ok(Some(rel)) = guard.db.get_release(rel_id as i64) else {
+                return;
+            };
+            let tracks = guard
+                .db
+                .list_release_tracks(rel_id as i64)
+                .unwrap_or_default();
+            let Some(trk) = tracks
+                .into_iter()
+                .find(|t| t.disc_number == disc_num && t.track_number == track_num)
+            else {
+                return;
+            };
+            let Some(preview_url) = trk.preview_url.filter(|u| !u.is_empty()) else {
+                win.set_status_is_warning(true);
+                win.set_status_banner_text("No 30s preview available for this track".into());
+                return;
+            };
+
+            // Populate Mini-Player cover art immediately
+            if let Some(cov) = guard.decoded_covers.get(&rel.id) {
+                win.set_preview_cover(cov.clone());
+                win.set_preview_has_cover(true);
+            } else {
+                win.set_preview_has_cover(false);
+            }
+            win.set_preview_monogram(make_monogram(&rel.artist_name).into());
+            win.set_preview_accent_hue((rel.artist_id.unsigned_abs() % 6) as i32);
+
+            guard.audio.play(PreviewRequest {
+                release_id: rel.id,
+                disc_number: disc_num,
+                track_number: track_num,
+                track_title: trk.title,
+                artist_name: rel.artist_name,
+                release_title: rel.title,
+                preview_url,
+            });
+        });
+    }
+
+    {
+        let st = state.clone();
+        app.on_toggle_preview_pause(move || {
+            st.borrow().audio.toggle_pause();
+        });
+    }
+
+    {
+        let st = state.clone();
+        app.on_seek_preview(move |frac| {
+            st.borrow().audio.seek(frac);
+        });
+    }
+
+    {
+        let st = state.clone();
+        app.on_set_preview_volume(move |pct| {
+            let clamped = pct.clamp(0, 100) as u8;
+            let mut guard = st.borrow_mut();
+            guard.audio.set_volume(clamped);
+            guard.settings.preview_volume = clamped;
+            let s = guard.settings.clone();
+            let _ = guard.db.save_settings(&s);
+        });
+    }
+
+    {
+        let st = state.clone();
+        app.on_stop_preview(move || {
+            st.borrow().audio.stop();
         });
     }
 
@@ -149,6 +274,13 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
         let st = state.clone();
         app.on_select_release(move |rel_id| {
             let Some(win) = weak.upgrade() else { return };
+            if win.get_selected_release_id() == rel_id
+                && (win.get_active_view() == 0 || win.get_active_view() == 1)
+            {
+                win.set_selected_release_id(0);
+                win.set_loading_tracks(false);
+                return;
+            }
             open_release_inspector(&win, &st, rel_id as i64);
         });
     }
@@ -215,7 +347,14 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
                 (win.get_filtered_artist_id() > 0).then(|| win.get_filtered_artist_id() as i64);
             if let Ok(count) = guard.db.mark_all_releases_seen(artist_filter) {
                 win.set_status_is_warning(false);
-                win.set_status_banner_text(format!("Marked {count} releases as seen").into());
+                win.set_status_banner_text(
+                    format!(
+                        "Marked {} {} as seen",
+                        count,
+                        pluralize(count as i64, "release", "releases")
+                    )
+                    .into(),
+                );
             }
             refresh_folders_and_stats(&win, &guard);
             refresh_feed(&win, &mut guard);
@@ -245,8 +384,8 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
             win.set_active_view(2);
             win.set_artist_filter_index(0);
             win.set_artist_search_text(SharedString::default());
-            let guard = st.borrow();
-            refresh_artists(&win, &guard);
+            let mut guard = st.borrow_mut();
+            refresh_artists(&win, &mut guard);
             select_artist_detail(&win, &guard, artist_id as i64);
         });
     }
@@ -259,7 +398,7 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
         let st = state.clone();
         app.on_artist_filters_changed(move || {
             let Some(win) = weak.upgrade() else { return };
-            refresh_artists(&win, &st.borrow());
+            refresh_artists(&win, &mut st.borrow_mut());
         });
     }
 
@@ -309,7 +448,7 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
                 };
                 let _ = guard.db.set_artist_status(art.id, next);
                 refresh_folders_and_stats(&win, &guard);
-                refresh_artists(&win, &guard);
+                refresh_artists(&win, &mut guard);
                 if win.get_selected_artist_id() == artist_id {
                     select_artist_detail(&win, &guard, artist_id as i64);
                 }
@@ -332,7 +471,7 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
                 };
                 let _ = guard.db.set_artist_status(art.id, next);
                 refresh_folders_and_stats(&win, &guard);
-                refresh_artists(&win, &guard);
+                refresh_artists(&win, &mut guard);
                 if win.get_selected_artist_id() == artist_id {
                     select_artist_detail(&win, &guard, artist_id as i64);
                 }
@@ -352,7 +491,7 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
                 win.set_selected_artist_id(0);
             }
             refresh_folders_and_stats(&win, &guard);
-            refresh_artists(&win, &guard);
+            refresh_artists(&win, &mut guard);
             refresh_feed(&win, &mut guard);
         });
     }
@@ -380,7 +519,7 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
                 (!t.is_empty()).then_some(t)
             };
 
-            let guard = st.borrow();
+            let mut guard = st.borrow_mut();
             if let Err(e) = guard
                 .db
                 .override_artist_ids(artist_id as i64, mbid_opt, parsed_dz)
@@ -390,8 +529,8 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
                 return;
             }
             win.set_status_is_warning(false);
-            win.set_status_banner_text("Updated artist provider IDs".into());
-            refresh_artists(&win, &guard);
+            win.set_status_banner_text("Saved artist provider IDs".into());
+            refresh_artists(&win, &mut guard);
             select_artist_detail(&win, &guard, artist_id as i64);
         });
     }
@@ -422,8 +561,6 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
                     win.set_searching_external_artists(false);
                     match res {
                         Ok(cands) => {
-                            // Store candidates in UI window via global event loop closure?
-                            // We attach them via a custom update helper below.
                             CANDIDATE_STASH.with(|stash| {
                                 *stash.borrow_mut() = cands.clone();
                             });
@@ -457,7 +594,7 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
         app.on_add_artist_by_name(move |name| {
             let Some(win) = weak.upgrade() else { return };
             let artist_id = {
-                let guard = st.borrow();
+                let mut guard = st.borrow_mut();
                 match guard
                     .db
                     .add_manual_artist(name.as_str(), None, None, None, None, None)
@@ -473,7 +610,7 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
                             format!("Added '{}' to tracked artists", art.name).into(),
                         );
                         refresh_folders_and_stats(&win, &guard);
-                        refresh_artists(&win, &guard);
+                        refresh_artists(&win, &mut guard);
                         Some(art.id)
                     }
                     Err(err) => {
@@ -498,7 +635,7 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
             let Some(cand) = chosen else { return };
 
             let artist_id = {
-                let guard = st.borrow();
+                let mut guard = st.borrow_mut();
                 match guard.db.add_manual_artist(
                     &cand.name,
                     cand.mbid.as_deref(),
@@ -517,7 +654,7 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
                         win.set_status_is_warning(false);
                         win.set_status_banner_text(format!("Tracking '{}'", art.name).into());
                         refresh_folders_and_stats(&win, &guard);
-                        refresh_artists(&win, &guard);
+                        refresh_artists(&win, &mut guard);
                         Some(art.id)
                     }
                     Err(err) => {
@@ -596,9 +733,19 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
         let st = state.clone();
         app.on_remove_folder(move |folder_id| {
             let Some(win) = weak.upgrade() else { return };
-            let guard = st.borrow();
-            let _ = guard.db.remove_library_folder(folder_id as i64);
-            refresh_folders_and_stats(&win, &guard);
+            let has_remaining = {
+                let guard = st.borrow();
+                let _ = guard.db.remove_library_folder(folder_id as i64);
+                refresh_folders_and_stats(&win, &guard);
+                guard
+                    .db
+                    .list_library_folders()
+                    .map(|v| !v.is_empty())
+                    .unwrap_or(false)
+            };
+            if has_remaining && !win.get_is_busy() {
+                start_library_scan(&weak, &st);
+            }
         });
     }
 
@@ -608,7 +755,9 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
         app.on_preferences_changed(move || {
             let Some(win) = weak.upgrade() else { return };
             let mut guard = st.borrow_mut();
-            let updated = read_settings_from_window(&win);
+            let prev_vol = guard.settings.preview_volume;
+            let mut updated = read_settings_from_window(&win);
+            updated.preview_volume = prev_vol;
             win.set_feed_hide_owned(updated.hide_owned_locally);
             let _ = guard.db.save_settings(&updated);
             guard.settings = updated;
@@ -619,13 +768,39 @@ pub fn wire_controller(app: &AppWindow, paths: AppPaths) -> Result<(SharedUiStat
     {
         let weak = app.as_weak();
         let st = state.clone();
+        app.on_scan_preferences_changed(move || {
+            let Some(win) = weak.upgrade() else { return };
+            let should_rescan = {
+                let mut guard = st.borrow_mut();
+                let prev_vol = guard.settings.preview_volume;
+                let mut updated = read_settings_from_window(&win);
+                updated.preview_volume = prev_vol;
+                let _ = guard.db.save_settings(&updated);
+                guard.settings = updated;
+                !win.get_is_busy()
+                    && guard
+                        .db
+                        .list_library_folders()
+                        .map(|f| f.iter().any(|x| x.enabled))
+                        .unwrap_or(false)
+            };
+            if should_rescan {
+                start_library_scan(&weak, &st);
+            }
+        });
+    }
+
+    {
+        let weak = app.as_weak();
+        let st = state.clone();
         app.on_theme_toggled(move |dark| {
             let Some(win) = weak.upgrade() else { return };
             let mut guard = st.borrow_mut();
             guard.settings.dark_mode = dark;
+            let accent = guard.settings.accent_preset as i32;
             let s = guard.settings.clone();
             let _ = guard.db.save_settings(&s);
-            win.invoke_apply_theme(dark);
+            win.invoke_apply_theme(dark, accent);
         });
     }
 
@@ -679,7 +854,7 @@ fn start_library_scan(weak: &Weak<AppWindow>, state: &Rc<RefCell<UiState>>) {
         return;
     }
 
-    let (folders, db_path, include_compilations, cancel_flag) = {
+    let (folders, db_path, scan_options, cancel_flag) = {
         let mut guard = state.borrow_mut();
         let Ok(list) = guard.db.list_library_folders() else {
             return;
@@ -699,7 +874,7 @@ fn start_library_scan(weak: &Weak<AppWindow>, state: &Rc<RefCell<UiState>>) {
         (
             enabled,
             guard.paths.db_path.clone(),
-            guard.settings.include_compilation_artists,
+            ScanOptions::from_settings(&guard.settings),
             guard.cancel_flag.clone(),
         )
     };
@@ -713,9 +888,9 @@ fn start_library_scan(weak: &Weak<AppWindow>, state: &Rc<RefCell<UiState>>) {
     let weak_done = weak.clone();
 
     thread::spawn(move || {
-        let scan_res = scan_library_folders(
+        let scan_res = scan_library_folders_with_options(
             &folders,
-            include_compilations,
+            &scan_options,
             Some(&cancel_flag),
             |folder_name, count| {
                 let label = format!("Scanned {count} files · {folder_name}");
@@ -745,8 +920,13 @@ fn start_library_scan(weak: &Weak<AppWindow>, state: &Rc<RefCell<UiState>>) {
                     win.set_status_is_warning(false);
                     win.set_status_banner_text(
                         format!(
-                            "Discovered {} artists ({} albums) from {} files",
-                            sum.artists_discovered, sum.local_albums_indexed, sum.audio_files_seen
+                            "Discovered {} {} ({} {}) from {} {}",
+                            sum.artists_discovered,
+                            pluralize(sum.artists_discovered as i64, "artist", "artists"),
+                            sum.local_albums_indexed,
+                            pluralize(sum.local_albums_indexed as i64, "album", "albums"),
+                            sum.audio_files_seen,
+                            pluralize(sum.audio_files_seen as i64, "file", "files"),
                         )
                         .into(),
                     );
@@ -760,7 +940,6 @@ fn start_library_scan(weak: &Weak<AppWindow>, state: &Rc<RefCell<UiState>>) {
                     win.set_status_banner_text(format!("Scan error: {err}").into());
                 }
             }
-            // Trigger UI reload via feed_filters_changed + artist_filters_changed
             win.invoke_feed_filters_changed();
             win.invoke_artist_filters_changed();
             win.invoke_navigate(win.get_active_view());
@@ -814,7 +993,14 @@ fn start_release_sync(
     win.set_is_busy(true);
     win.set_progress_indeterminate(false);
     win.set_progress_fraction(0.0);
-    win.set_busy_label(format!("Checking {} artists...", artists.len()).into());
+    win.set_busy_label(
+        format!(
+            "Checking {} {}...",
+            artists.len(),
+            pluralize(artists.len() as i64, "artist", "artists")
+        )
+        .into(),
+    );
 
     let weak_prog = weak.clone();
     let weak_done = weak.clone();
@@ -839,11 +1025,16 @@ fn start_release_sync(
                             0.0
                         };
                         let lbl = format!("({current}/{total}) {artist_name}");
+                        let refresh_live = current > 1 && current % 8 == 1;
                         let w = weak_prog.clone();
                         let _ = slint::invoke_from_event_loop(move || {
                             if let Some(win) = w.upgrade() {
                                 win.set_progress_fraction(frac);
                                 win.set_busy_label(lbl.into());
+                                if refresh_live {
+                                    win.invoke_feed_filters_changed();
+                                    win.invoke_artist_filters_changed();
+                                }
                             }
                         });
                     }
@@ -872,8 +1063,11 @@ fn start_release_sync(
                         win.set_status_is_warning(sum.offline_or_rate_limited);
                         win.set_status_banner_text(
                             format!(
-                                "Checked {} artists · {} new drops found",
-                                sum.artists_checked, sum.new_releases_added
+                                "Checked {} {} · {} new {}",
+                                sum.artists_checked,
+                                pluralize(sum.artists_checked as i64, "artist", "artists"),
+                                sum.new_releases_added,
+                                pluralize(sum.new_releases_added as i64, "drop", "drops"),
                             )
                             .into(),
                         );
@@ -914,14 +1108,22 @@ fn open_release_inspector(win: &AppWindow, state: &Rc<RefCell<UiState>>, release
         )
     };
 
+    let has_expired_preview = cached_tracks.iter().any(|t| {
+        t.preview_url
+            .as_deref()
+            .is_some_and(is_deezer_preview_url_expired)
+    });
+
     if !cached_tracks.is_empty() {
         win.set_loading_tracks(false);
         win.set_selected_release_tracks(tracks_to_model(&cached_tracks));
-        return;
+        if !has_expired_preview {
+            return;
+        }
+    } else {
+        win.set_selected_release_tracks(ModelRc::new(VecModel::<TrackRowData>::default()));
+        win.set_loading_tracks(true);
     }
-
-    win.set_selected_release_tracks(ModelRc::new(VecModel::<TrackRowData>::default()));
-    win.set_loading_tracks(true);
 
     let weak = win.as_weak();
     thread::spawn(move || {
@@ -936,78 +1138,137 @@ fn open_release_inspector(win: &AppWindow, state: &Rc<RefCell<UiState>>, release
             }
             win.set_loading_tracks(false);
             if let Ok(tracks) = fetched {
-                win.set_selected_release_tracks(tracks_to_model(&tracks));
+                if !tracks.is_empty() {
+                    win.set_selected_release_tracks(tracks_to_model(&tracks));
+                }
             }
         });
     });
 }
 
-fn spawn_cover_worker(
-    db_path: std::path::PathBuf,
+fn spawn_image_worker(
+    paths: AppPaths,
     engine: SyncEngine,
-    rx: mpsc::Receiver<Release>,
+    rx: mpsc::Receiver<ImageJob>,
     weak: Weak<AppWindow>,
     state: &Rc<RefCell<UiState>>,
 ) {
-    // Keep a weak/shared pointer via thread-local UI callback
     let st_ptr = Rc::downgrade(state);
-    // Notice `Weak<RefCell<UiState>>` is `!Send`, so store it in a `thread_local!` on the UI thread!
     UI_STATE_SLOT.with(|slot| {
         *slot.borrow_mut() = Some(st_ptr);
     });
 
     thread::spawn(move || {
-        let Ok(worker_db) = Database::open(&db_path) else {
+        let Ok(worker_db) = Database::open(&paths.db_path) else {
             return;
         };
-        while let Ok(release) = rx.recv() {
-            let Ok(Some(local_path)) = engine.ensure_release_cover_cached(&worker_db, &release)
-            else {
-                continue;
-            };
-            let Some((w, h, rgba)) = decode_thumbnail_rgba(&local_path, 360) else {
-                continue;
-            };
-
-            let rel_id = release.id;
-            let weak_win = weak.clone();
-            let _ = slint::invoke_from_event_loop(move || {
-                let buf = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&rgba, w, h);
-                let slint_img = Image::from_rgba8(buf);
-
-                UI_STATE_SLOT.with(|slot| {
-                    let Some(ref weak_st) = *slot.borrow() else {
-                        return;
+        while let Ok(job) = rx.recv() {
+            match job {
+                ImageJob::ReleaseCover(release) => {
+                    let Ok(Some(local_path)) =
+                        engine.ensure_release_cover_cached(&worker_db, &release)
+                    else {
+                        continue;
                     };
-                    let Some(rc_st) = weak_st.upgrade() else {
-                        return;
+                    let Some((w, h, rgba)) = decode_thumbnail_rgba(&local_path, 360) else {
+                        continue;
                     };
-                    let mut guard = rc_st.borrow_mut();
-                    guard.inflight_covers.remove(&rel_id);
-                    guard.decoded_covers.insert(rel_id, slint_img.clone());
 
-                    let row_count = guard.release_model.row_count();
-                    for idx in 0..row_count {
-                        if let Some(mut row) = guard.release_model.row_data(idx) {
-                            if row.id == rel_id as i32 {
-                                row.cover = slint_img.clone();
-                                row.has_cover = true;
-                                guard.release_model.set_row_data(idx, row);
-                                break;
+                    let rel_id = release.id;
+                    let weak_win = weak.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        let buf = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&rgba, w, h);
+                        let slint_img = Image::from_rgba8(buf);
+
+                        UI_STATE_SLOT.with(|slot| {
+                            let Some(ref weak_st) = *slot.borrow() else {
+                                return;
+                            };
+                            let Some(rc_st) = weak_st.upgrade() else {
+                                return;
+                            };
+                            let mut guard = rc_st.borrow_mut();
+                            guard.inflight_covers.remove(&rel_id);
+                            guard.decoded_covers.insert(rel_id, slint_img.clone());
+
+                            let row_count = guard.release_model.row_count();
+                            for idx in 0..row_count {
+                                if let Some(mut row) = guard.release_model.row_data(idx) {
+                                    if row.id == rel_id as i32 {
+                                        row.cover = slint_img.clone();
+                                        row.has_cover = true;
+                                        guard.release_model.set_row_data(idx, row);
+                                        break;
+                                    }
+                                }
                             }
-                        }
-                    }
 
-                    if let Some(win) = weak_win.upgrade() {
-                        if win.get_selected_release_id() == rel_id as i32 {
-                            let mut sel = win.get_selected_release();
-                            sel.cover = slint_img;
-                            sel.has_cover = true;
-                            win.set_selected_release(sel);
-                        }
-                    }
-                });
-            });
+                            if let Some(win) = weak_win.upgrade() {
+                                if win.get_selected_release_id() == rel_id as i32 {
+                                    let mut sel = win.get_selected_release();
+                                    sel.cover = slint_img.clone();
+                                    sel.has_cover = true;
+                                    win.set_selected_release(sel);
+                                }
+                                if win.get_preview_release_id() == rel_id as i32 {
+                                    win.set_preview_cover(slint_img);
+                                    win.set_preview_has_cover(true);
+                                }
+                            }
+                        });
+                    });
+                }
+                ImageJob::ArtistAvatar(artist) => {
+                    let Ok(Some(local_path)) =
+                        engine.ensure_artist_avatar_cached(&paths.avatar_cache_dir, &artist)
+                    else {
+                        continue;
+                    };
+                    let Some((w, h, rgba)) = decode_thumbnail_rgba(&local_path, 128) else {
+                        continue;
+                    };
+
+                    let art_id = artist.id;
+                    let weak_win = weak.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        let buf = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&rgba, w, h);
+                        let slint_img = Image::from_rgba8(buf);
+
+                        UI_STATE_SLOT.with(|slot| {
+                            let Some(ref weak_st) = *slot.borrow() else {
+                                return;
+                            };
+                            let Some(rc_st) = weak_st.upgrade() else {
+                                return;
+                            };
+                            let mut guard = rc_st.borrow_mut();
+                            guard.inflight_avatars.remove(&art_id);
+                            guard.decoded_avatars.insert(art_id, slint_img.clone());
+
+                            let row_count = guard.artist_model.row_count();
+                            for idx in 0..row_count {
+                                if let Some(mut row) = guard.artist_model.row_data(idx) {
+                                    if row.id == art_id as i32 {
+                                        row.avatar = slint_img.clone();
+                                        row.has_avatar = true;
+                                        guard.artist_model.set_row_data(idx, row);
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if let Some(win) = weak_win.upgrade() {
+                                if win.get_selected_artist_id() == art_id as i32 {
+                                    let mut sel = win.get_selected_artist();
+                                    sel.avatar = slint_img;
+                                    sel.has_avatar = true;
+                                    win.set_selected_artist(sel);
+                                }
+                            }
+                        });
+                    });
+                }
+            }
         }
     });
 }
@@ -1034,6 +1295,11 @@ fn decode_thumbnail_rgba(path: &Path, max_dim: u32) -> Option<(u32, u32, Vec<u8>
 
 fn apply_settings_to_window(win: &AppWindow, s: &AppSettings) {
     win.set_pref_dark_mode(s.dark_mode);
+    win.set_pref_accent_preset(i32::from(s.accent_preset));
+    win.set_pref_grid_density(i32::from(s.grid_density));
+    win.set_preview_volume_pct(i32::from(s.preview_volume));
+    win.set_pref_discovery_mode(s.artist_discovery_mode.index());
+    win.set_pref_split_collaborations(s.split_collaborations);
     win.set_pref_include_albums(s.include_albums);
     win.set_pref_include_eps(s.include_eps);
     win.set_pref_include_singles(s.include_singles);
@@ -1044,12 +1310,15 @@ fn apply_settings_to_window(win: &AppWindow, s: &AppSettings) {
     win.set_pref_lookback_index(s.lookback_index());
     win.set_pref_provider_index(s.provider_mode.index());
     win.set_pref_schedule_index(s.interval_index());
-    win.invoke_apply_theme(s.dark_mode);
+    win.invoke_apply_theme(s.dark_mode, i32::from(s.accent_preset));
 }
 
 fn read_settings_from_window(win: &AppWindow) -> AppSettings {
     AppSettings {
         dark_mode: win.get_pref_dark_mode(),
+        accent_preset: win.get_pref_accent_preset().clamp(0, 5) as u8,
+        grid_density: win.get_pref_grid_density().clamp(0, 2) as u8,
+        preview_volume: win.get_preview_volume_pct().clamp(0, 100) as u8,
         lookback_days: AppSettings::lookback_days_from_index(win.get_pref_lookback_index()),
         include_albums: win.get_pref_include_albums(),
         include_eps: win.get_pref_include_eps(),
@@ -1057,6 +1326,8 @@ fn read_settings_from_window(win: &AppWindow) -> AppSettings {
         hide_owned_locally: win.get_pref_hide_owned(),
         hide_compilations_and_live: win.get_pref_hide_noise(),
         include_compilation_artists: win.get_pref_include_compilations(),
+        artist_discovery_mode: ArtistDiscoveryMode::from_index(win.get_pref_discovery_mode()),
+        split_collaborations: win.get_pref_split_collaborations(),
         auto_check_interval_hours: AppSettings::interval_hours_from_index(
             win.get_pref_schedule_index(),
         ),
@@ -1065,6 +1336,7 @@ fn read_settings_from_window(win: &AppWindow) -> AppSettings {
 }
 
 fn refresh_folders_and_stats(win: &AppWindow, state: &UiState) {
+    let today = today_iso_utc();
     if let Ok(folders) = state.db.list_library_folders() {
         let rows: Vec<FolderRowData> = folders
             .into_iter()
@@ -1072,12 +1344,18 @@ fn refresh_folders_and_stats(win: &AppWindow, state: &UiState) {
                 let scanned = f
                     .last_scanned_at
                     .as_deref()
-                    .map(short_timestamp)
+                    .map(|ts| format!("Scanned {}", compact_timestamp(ts, &today)))
                     .unwrap_or_else(|| "Not yet scanned".to_string());
                 FolderRowData {
                     id: f.id as i32,
                     path: f.path.into(),
-                    stats_label: format!("{} audio files · {}", f.track_count, scanned).into(),
+                    stats_label: format!(
+                        "{} audio {} · {}",
+                        f.track_count,
+                        pluralize(f.track_count, "file", "files"),
+                        scanned
+                    )
+                    .into(),
                 }
             })
             .collect();
@@ -1088,8 +1366,11 @@ fn refresh_folders_and_stats(win: &AppWindow, state: &UiState) {
         win.set_unseen_badge_count(stats.unseen_releases as i32);
         win.set_library_summary_text(
             format!(
-                "{} tracked artists · {} local albums",
-                stats.tracked_artists, stats.local_albums
+                "{} tracked {} · {} local {}",
+                stats.tracked_artists,
+                pluralize(stats.tracked_artists as i64, "artist", "artists"),
+                stats.local_albums,
+                pluralize(stats.local_albums as i64, "album", "albums"),
             )
             .into(),
         );
@@ -1134,7 +1415,7 @@ fn refresh_feed(win: &AppWindow, state: &mut UiState) {
             && !state.inflight_covers.contains(&rel.id)
         {
             state.inflight_covers.insert(rel.id);
-            let _ = state.cover_tx.send(rel.clone());
+            let _ = state.image_tx.send(ImageJob::ReleaseCover(rel.clone()));
         }
         cards.push(to_release_card(&rel, cached_img.as_ref()));
     }
@@ -1143,7 +1424,7 @@ fn refresh_feed(win: &AppWindow, state: &mut UiState) {
     refresh_folders_and_stats(win, state);
 }
 
-fn refresh_artists(win: &AppWindow, state: &UiState) {
+fn refresh_artists(win: &AppWindow, state: &mut UiState) {
     let filter_idx = win.get_artist_filter_index();
     let status_filter = match filter_idx {
         1 => Some(ArtistStatus::Tracked),
@@ -1153,13 +1434,25 @@ fn refresh_artists(win: &AppWindow, state: &UiState) {
     };
     let only_manual = filter_idx == 4;
     let search = win.get_artist_search_text();
+    let today = today_iso_utc();
 
     if let Ok(list) = state
         .db
         .list_artists(search.as_str(), status_filter, only_manual)
     {
-        let rows: Vec<ArtistRowData> = list.iter().map(to_artist_row).collect();
-        win.set_artists(ModelRc::new(VecModel::from(rows)));
+        let mut rows = Vec::with_capacity(list.len());
+        for art in list {
+            let cached_avatar = state.decoded_avatars.get(&art.id).cloned();
+            if cached_avatar.is_none()
+                && art.avatar_url.is_some()
+                && !state.inflight_avatars.contains(&art.id)
+            {
+                state.inflight_avatars.insert(art.id);
+                let _ = state.image_tx.send(ImageJob::ArtistAvatar(art.clone()));
+            }
+            rows.push(to_artist_row(&art, cached_avatar.as_ref(), &today));
+        }
+        state.artist_model.set_vec(rows);
     }
 }
 
@@ -1173,7 +1466,8 @@ fn select_artist_detail(win: &AppWindow, state: &UiState, artist_id: i64) {
         return;
     };
 
-    let row = to_artist_row(&artist);
+    let today = today_iso_utc();
+    let row = to_artist_row(&artist, state.decoded_avatars.get(&artist.id), &today);
     win.set_edit_artist_mbid(row.mbid.clone());
     win.set_edit_artist_deezer_id(row.deezer_id.clone());
     win.set_selected_artist(row);
@@ -1192,7 +1486,12 @@ fn select_artist_detail(win: &AppWindow, state: &UiState, artist_id: i64) {
                 .map(|y| y.to_string())
                 .unwrap_or_default()
                 .into(),
-            track_count_label: format!("{} local tracks", a.track_count).into(),
+            track_count_label: format!(
+                "{} local {}",
+                a.track_count,
+                pluralize(a.track_count, "track", "tracks")
+            )
+            .into(),
             sample_path: a.sample_path.unwrap_or_default().into(),
         })
         .collect();
@@ -1229,34 +1528,53 @@ fn to_release_card(rel: &Release, cover_img: Option<&Image>) -> ReleaseCardData 
     }
 }
 
-fn to_artist_row(art: &Artist) -> ArtistRowData {
+fn to_artist_row(art: &Artist, avatar_img: Option<&Image>, today_iso: &str) -> ArtistRowData {
     let source_label = match art.source {
         ArtistSource::Manual => {
             if art.local_track_count > 0 {
                 format!(
-                    "Manual + {} albums ({} tracks)",
-                    art.local_album_count, art.local_track_count
+                    "{} {} ({} {})",
+                    art.local_album_count,
+                    pluralize(art.local_album_count, "album", "albums"),
+                    art.local_track_count,
+                    pluralize(art.local_track_count, "track", "tracks"),
                 )
             } else {
-                "Added manually".to_string()
+                "Manual radar".to_string()
             }
         }
-        ArtistSource::Local => format!(
-            "{} local albums · {} tracks",
-            art.local_album_count, art.local_track_count
-        ),
+        ArtistSource::Local => {
+            if art.local_album_count > 0 {
+                format!(
+                    "{} local {} · {} {}",
+                    art.local_album_count,
+                    pluralize(art.local_album_count, "album", "albums"),
+                    art.local_track_count,
+                    pluralize(art.local_track_count, "track", "tracks"),
+                )
+            } else {
+                format!(
+                    "{} local {}",
+                    art.local_track_count,
+                    pluralize(art.local_track_count, "track", "tracks"),
+                )
+            }
+        }
     };
 
     let last_checked = art
         .last_checked_at
         .as_deref()
-        .map(|ts| format!("Checked {}", short_timestamp(ts)))
-        .unwrap_or_else(|| "Never checked".to_string());
+        .map(|ts| compact_timestamp(ts, today_iso))
+        .unwrap_or_else(|| "Unchecked".to_string());
 
     ArtistRowData {
         id: art.id as i32,
         name: art.name.clone().into(),
         monogram: make_monogram(&art.name).into(),
+        accent_hue: (art.id.unsigned_abs() % 6) as i32,
+        avatar: avatar_img.cloned().unwrap_or_default(),
+        has_avatar: avatar_img.is_some(),
         disambiguation: art.disambiguation.clone().unwrap_or_default().into(),
         source_label: source_label.into(),
         status: art.status.as_str().into(),
@@ -1321,9 +1639,23 @@ fn make_monogram(name: &str) -> String {
     }
 }
 
-fn short_timestamp(rfc3339: &str) -> String {
+fn pluralize<'a>(count: i64, singular: &'a str, plural: &'a str) -> &'a str {
+    if count == 1 {
+        singular
+    } else {
+        plural
+    }
+}
+
+fn compact_timestamp(rfc3339: &str, today_iso: &str) -> String {
     if rfc3339.len() >= 16 {
-        rfc3339[..16].replace('T', " ")
+        let date_part = &rfc3339[..10];
+        let time_part = &rfc3339[11..16];
+        if date_part == today_iso {
+            format!("Today {time_part}")
+        } else {
+            date_part.to_string()
+        }
     } else {
         rfc3339.to_string()
     }

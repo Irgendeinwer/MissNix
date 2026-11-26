@@ -9,10 +9,11 @@ use lofty::tag::{Accessor, ItemKey, Tag};
 use walkdir::WalkDir;
 
 use crate::error::{CoreError, CoreResult};
-use crate::models::ScanSummary;
+use crate::models::{AppSettings, ArtistDiscoveryMode, ScanSummary};
 use crate::normalize::{
-    clean_folder_album_name, collapse_whitespace, is_disc_subfolder, is_various_or_generic_artist,
-    normalize_artist_name, normalize_release_title, strip_featured_artists,
+    clean_folder_album_name, collapse_whitespace, extract_primary_artist,
+    fold_diacritics_and_symbols, is_disc_subfolder, is_generic_bucket_folder,
+    is_various_or_generic_artist, normalize_artist_name, normalize_release_title,
 };
 
 const AUDIO_EXTENSIONS: &[&str] = &[
@@ -40,6 +41,33 @@ pub struct DiscoveredArtistRecord {
     pub albums: HashMap<String, DiscoveredAlbumRecord>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct ScanOptions {
+    pub discovery_mode: ArtistDiscoveryMode,
+    pub split_collaborations: bool,
+    pub include_compilation_artists: bool,
+}
+
+impl Default for ScanOptions {
+    fn default() -> Self {
+        Self {
+            discovery_mode: ArtistDiscoveryMode::AlbumArtistOrFolder,
+            split_collaborations: true,
+            include_compilation_artists: false,
+        }
+    }
+}
+
+impl ScanOptions {
+    pub fn from_settings(settings: &AppSettings) -> Self {
+        Self {
+            discovery_mode: settings.artist_discovery_mode,
+            split_collaborations: settings.split_collaborations,
+            include_compilation_artists: settings.include_compilation_artists,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct ScanOutcome {
     pub summary: ScanSummary,
@@ -49,14 +77,15 @@ pub struct ScanOutcome {
 
 #[derive(Debug, Default)]
 struct ExtractedTrackMeta {
-    artist: Option<String>,
+    album_artist: Option<String>,
+    track_artist: Option<String>,
     album: Option<String>,
     year: Option<i32>,
     is_compilation: bool,
-    mb_artist_id: Option<String>,
+    mb_album_artist_id: Option<String>,
+    mb_track_artist_id: Option<String>,
     mb_release_group_id: Option<String>,
     mb_album_id: Option<String>,
-    had_tag_artist: bool,
 }
 
 pub fn is_supported_audio_file(path: &Path) -> bool {
@@ -69,11 +98,28 @@ pub fn is_supported_audio_file(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Scan one or more music library folders, extracting artist & album identity from
-/// embedded audio tags (`lofty`) with intelligent folder-structure fallback.
+/// Scan one or more music library folders with default `AlbumArtistOrFolder` + collaboration-splitting rules.
 pub fn scan_library_folders<F>(
     folders: &[PathBuf],
     include_compilation_artists: bool,
+    cancel_flag: Option<&AtomicBool>,
+    on_progress: F,
+) -> CoreResult<ScanOutcome>
+where
+    F: FnMut(&str, usize),
+{
+    let options = ScanOptions {
+        include_compilation_artists,
+        ..ScanOptions::default()
+    };
+    scan_library_folders_with_options(folders, &options, cancel_flag, on_progress)
+}
+
+/// Scan one or more music library folders using configurable artist discovery mode and
+/// multi-artist collaboration handling.
+pub fn scan_library_folders_with_options<F>(
+    folders: &[PathBuf],
+    options: &ScanOptions,
     cancel_flag: Option<&AtomicBool>,
     mut on_progress: F,
 ) -> CoreResult<ScanOutcome>
@@ -122,68 +168,67 @@ where
                 on_progress(&root_display, outcome.summary.audio_files_seen);
             }
 
-            let mut meta =
-                extract_tags_from_file(file_path, parse_options, include_compilation_artists);
+            let meta = extract_tags_from_file(file_path, parse_options);
 
-            if meta.is_compilation && !include_compilation_artists {
+            if meta.is_compilation && !options.include_compilation_artists {
                 outcome.summary.skipped_compilations += 1;
                 continue;
             }
 
             let folder_hint = infer_from_folder_hierarchy(root, file_path);
 
-            let used_tag_artist = meta.had_tag_artist;
-            if meta.artist.is_none() {
-                meta.artist = folder_hint.artist;
-            }
-            if meta.album.is_none() {
-                meta.album = folder_hint.album;
-            }
-            if meta.year.is_none() {
-                meta.year = folder_hint.year;
-            }
-
-            let Some(raw_artist) = meta.artist else {
+            let Some(resolved) = resolve_artist_identity(&meta, &folder_hint, options) else {
+                if meta.is_compilation
+                    || meta
+                        .album_artist
+                        .as_deref()
+                        .is_some_and(is_various_or_generic_artist)
+                    || folder_hint
+                        .artist
+                        .as_deref()
+                        .is_some_and(is_various_or_generic_artist)
+                {
+                    outcome.summary.skipped_compilations += 1;
+                }
                 continue;
             };
-            if is_various_or_generic_artist(&raw_artist) {
-                outcome.summary.skipped_compilations += 1;
-                continue;
-            }
 
-            let norm_artist = normalize_artist_name(&raw_artist);
+            let display_artist = collapse_whitespace(&resolved.artist_name);
+            let norm_artist = normalize_artist_name(&display_artist);
             if norm_artist.is_empty() {
                 continue;
             }
 
-            if used_tag_artist {
+            if resolved.used_tag_artist {
                 outcome.summary.tags_extracted += 1;
             } else {
                 outcome.summary.folder_fallbacks += 1;
             }
 
-            let display_artist = collapse_whitespace(&strip_featured_artists(&raw_artist));
+            let album_title = meta
+                .album
+                .or(folder_hint.album)
+                .map(|a| collapse_whitespace(&a))
+                .filter(|a| !a.is_empty());
+            let release_year = meta.year.or(folder_hint.year);
+
             let artist_entry = outcome
                 .artists
                 .entry(norm_artist.clone())
                 .or_insert_with(|| DiscoveredArtistRecord {
                     display_name: display_artist.clone(),
                     normalized_name: norm_artist,
-                    mbid: meta.mb_artist_id.clone(),
+                    mbid: resolved.mb_artist_id.clone(),
                     track_count: 0,
                     albums: HashMap::new(),
                 });
 
             artist_entry.track_count += 1;
-            if artist_entry.mbid.is_none() && meta.mb_artist_id.is_some() {
-                artist_entry.mbid = meta.mb_artist_id.clone();
+            if artist_entry.mbid.is_none() && resolved.mb_artist_id.is_some() {
+                artist_entry.mbid = resolved.mb_artist_id;
             }
 
-            if let Some(album_title) = meta
-                .album
-                .map(|a| collapse_whitespace(&a))
-                .filter(|a| !a.is_empty())
-            {
+            if let Some(album_title) = album_title {
                 let norm_album = normalize_release_title(&album_title);
                 if !norm_album.is_empty() {
                     let album_entry = artist_entry
@@ -192,15 +237,15 @@ where
                         .or_insert_with(|| DiscoveredAlbumRecord {
                             title: album_title,
                             normalized_title: norm_album,
-                            release_year: meta.year,
+                            release_year,
                             mb_release_group_id: meta.mb_release_group_id.clone(),
                             mb_album_id: meta.mb_album_id.clone(),
                             track_count: 0,
                             sample_path: file_path.to_string_lossy().to_string(),
                         });
                     album_entry.track_count += 1;
-                    if album_entry.release_year.is_none() && meta.year.is_some() {
-                        album_entry.release_year = meta.year;
+                    if album_entry.release_year.is_none() && release_year.is_some() {
+                        album_entry.release_year = release_year;
                     }
                     if album_entry.mb_release_group_id.is_none()
                         && meta.mb_release_group_id.is_some()
@@ -225,11 +270,182 @@ where
     Ok(outcome)
 }
 
-fn extract_tags_from_file(
-    path: &Path,
-    options: ParseOptions,
-    include_compilation_artists: bool,
-) -> ExtractedTrackMeta {
+struct ResolvedArtist {
+    artist_name: String,
+    mb_artist_id: Option<String>,
+    used_tag_artist: bool,
+}
+
+fn resolve_artist_identity(
+    meta: &ExtractedTrackMeta,
+    folder_hint: &FolderHint,
+    options: &ScanOptions,
+) -> Option<ResolvedArtist> {
+    let valid_folder_artist = folder_hint
+        .artist
+        .as_deref()
+        .filter(|a| !is_various_or_generic_artist(a) && !is_generic_bucket_folder(a));
+
+    let clean_album_artist = meta
+        .album_artist
+        .as_deref()
+        .filter(|a| !is_various_or_generic_artist(a))
+        .map(|aa| extract_primary_artist(aa, valid_folder_artist, options.split_collaborations))
+        .filter(|a| !a.is_empty() && !is_various_or_generic_artist(a));
+
+    let clean_track_artist = meta
+        .track_artist
+        .as_deref()
+        .filter(|a| !is_various_or_generic_artist(a))
+        .map(|ta| extract_primary_artist(ta, valid_folder_artist, options.split_collaborations))
+        .filter(|a| !a.is_empty() && !is_various_or_generic_artist(a));
+
+    let clean_folder_artist = valid_folder_artist
+        .map(|fa| extract_primary_artist(fa, None, options.split_collaborations))
+        .filter(|a| {
+            !a.is_empty() && !is_various_or_generic_artist(a) && !is_generic_bucket_folder(a)
+        });
+
+    match options.discovery_mode {
+        ArtistDiscoveryMode::FolderOnly => {
+            let fa = clean_folder_artist?;
+            let fa_norm = fold_diacritics_and_symbols(&fa);
+            // Attach embedded MBID only if the embedded artist tag actually matches this folder artist
+            let mbid = if clean_album_artist
+                .as_deref()
+                .is_some_and(|aa| fold_diacritics_and_symbols(aa) == fa_norm)
+            {
+                meta.mb_album_artist_id
+                    .clone()
+                    .or_else(|| meta.mb_track_artist_id.clone())
+            } else if clean_track_artist
+                .as_deref()
+                .is_some_and(|ta| fold_diacritics_and_symbols(ta) == fa_norm)
+            {
+                meta.mb_track_artist_id.clone()
+            } else {
+                None
+            };
+            Some(ResolvedArtist {
+                artist_name: fa,
+                mb_artist_id: mbid,
+                used_tag_artist: false,
+            })
+        }
+        ArtistDiscoveryMode::AlbumArtistOrFolder => {
+            // 1. Explicit `ALBUMARTIST` tag (cleaned of multi-artist delimiters)
+            if let Some(aa) = clean_album_artist {
+                let mbid = safe_tag_mbid(
+                    meta.album_artist.as_deref(),
+                    &aa,
+                    meta.mb_album_artist_id
+                        .as_deref()
+                        .or(meta.mb_track_artist_id.as_deref()),
+                );
+                return Some(ResolvedArtist {
+                    artist_name: aa,
+                    mb_artist_id: mbid,
+                    used_tag_artist: true,
+                });
+            }
+
+            // 2. Structured `<Artist>/<Album>/track` or `<Artist - Album>/track` folder hierarchy
+            //    wins over messy per-track collaboration `ARTIST` tags!
+            if folder_hint.structured_album_hierarchy {
+                if let Some(fa) = clean_folder_artist {
+                    let fa_norm = fold_diacritics_and_symbols(&fa);
+                    let mbid = clean_track_artist
+                        .as_deref()
+                        .filter(|ta| fold_diacritics_and_symbols(ta) == fa_norm)
+                        .and_then(|ta| {
+                            safe_tag_mbid(
+                                meta.track_artist.as_deref(),
+                                ta,
+                                meta.mb_track_artist_id.as_deref(),
+                            )
+                        });
+                    return Some(ResolvedArtist {
+                        artist_name: fa,
+                        mb_artist_id: mbid,
+                        used_tag_artist: false,
+                    });
+                }
+            }
+
+            // 3. Cleaned primary artist from track `ARTIST` tag (for flat/bucket folders)
+            if let Some(ta) = clean_track_artist {
+                let mbid = safe_tag_mbid(
+                    meta.track_artist.as_deref(),
+                    &ta,
+                    meta.mb_track_artist_id.as_deref(),
+                );
+                return Some(ResolvedArtist {
+                    artist_name: ta,
+                    mb_artist_id: mbid,
+                    used_tag_artist: true,
+                });
+            }
+
+            // 4. Fallback to single-level folder / filename artist
+            clean_folder_artist.map(|fa| ResolvedArtist {
+                artist_name: fa,
+                mb_artist_id: None,
+                used_tag_artist: false,
+            })
+        }
+        ArtistDiscoveryMode::AllTagsAndFolder => {
+            if let Some(aa) = clean_album_artist {
+                let mbid = safe_tag_mbid(
+                    meta.album_artist.as_deref(),
+                    &aa,
+                    meta.mb_album_artist_id
+                        .as_deref()
+                        .or(meta.mb_track_artist_id.as_deref()),
+                );
+                return Some(ResolvedArtist {
+                    artist_name: aa,
+                    mb_artist_id: mbid,
+                    used_tag_artist: true,
+                });
+            }
+            if let Some(ta) = clean_track_artist {
+                let mbid = safe_tag_mbid(
+                    meta.track_artist.as_deref(),
+                    &ta,
+                    meta.mb_track_artist_id.as_deref(),
+                );
+                return Some(ResolvedArtist {
+                    artist_name: ta,
+                    mb_artist_id: mbid,
+                    used_tag_artist: true,
+                });
+            }
+            clean_folder_artist.map(|fa| ResolvedArtist {
+                artist_name: fa,
+                mb_artist_id: None,
+                used_tag_artist: false,
+            })
+        }
+    }
+}
+
+/// Only keep the extracted first UUID when `chosen_artist` corresponds to the lead artist
+/// of `raw_tag` (prevents attaching Artist A's UUID to Artist B when folder hint selects Artist B).
+fn safe_tag_mbid(raw_tag: Option<&str>, chosen_artist: &str, mbid: Option<&str>) -> Option<String> {
+    let uuid = mbid?;
+    let Some(raw) = raw_tag else {
+        return Some(uuid.to_string());
+    };
+    let raw_norm = fold_diacritics_and_symbols(raw);
+    let chosen_norm = fold_diacritics_and_symbols(chosen_artist);
+    if !chosen_norm.is_empty() && raw_norm.starts_with(&chosen_norm) {
+        Some(uuid.to_string())
+    } else {
+        None
+    }
+}
+
+fn extract_tags_from_file(path: &Path, options: ParseOptions) -> ExtractedTrackMeta {
     let mut out = ExtractedTrackMeta::default();
 
     let tagged = Probe::open(path)
@@ -318,22 +534,9 @@ fn extract_tags_from_file(
         .is_some_and(is_various_or_generic_artist)
     {
         out.is_compilation = true;
-        if include_compilation_artists {
-            if let Some(stripped) = track_artist
-                .as_deref()
-                .map(strip_featured_artists)
-                .filter(|s| !s.is_empty() && !is_various_or_generic_artist(s))
-            {
-                out.artist = Some(stripped);
-                out.mb_artist_id = mb_track_artist_id;
-                out.had_tag_artist = true;
-            }
-        }
-        return out;
-    }
-
-    // If FlagCompilation=1 with no distinct AlbumArtist, treat as compilation
-    if out.is_compilation && album_artist.is_none() && !include_compilation_artists {
+        out.album_artist = None;
+        out.track_artist = track_artist;
+        out.mb_track_artist_id = mb_track_artist_id;
         return out;
     }
 
@@ -343,22 +546,10 @@ fn extract_tags_from_file(
         out.is_compilation = false;
     }
 
-    if let Some(aa) = album_artist {
-        let cleaned = strip_featured_artists(&aa);
-        if !cleaned.is_empty() {
-            out.artist = Some(cleaned);
-            out.mb_artist_id = mb_album_artist_id.or(mb_track_artist_id);
-            out.had_tag_artist = true;
-        }
-    } else if let Some(ta) = track_artist {
-        let cleaned = strip_featured_artists(&ta);
-        if !cleaned.is_empty() {
-            out.artist = Some(cleaned);
-            out.mb_artist_id = mb_track_artist_id;
-            out.had_tag_artist = true;
-        }
-    }
-
+    out.album_artist = album_artist;
+    out.track_artist = track_artist;
+    out.mb_album_artist_id = mb_album_artist_id;
+    out.mb_track_artist_id = mb_track_artist_id;
     out
 }
 
@@ -416,6 +607,9 @@ struct FolderHint {
     artist: Option<String>,
     album: Option<String>,
     year: Option<i32>,
+    /// True when path follows `<Artist>/<Album>/track` or `<Artist - Album>/track`
+    /// rather than a loose dump directory.
+    structured_album_hierarchy: bool,
 }
 
 fn infer_from_folder_hierarchy(root: &Path, file_path: &Path) -> FolderHint {
@@ -453,6 +647,7 @@ fn infer_from_folder_hierarchy(root: &Path, file_path: &Path) -> FolderHint {
                             artist: Some(left.to_string()),
                             album: None,
                             year: None,
+                            structured_album_hierarchy: false,
                         };
                     }
                 }
@@ -472,6 +667,7 @@ fn infer_from_folder_hierarchy(root: &Path, file_path: &Path) -> FolderHint {
                         artist: Some(artist_clean.to_string()),
                         album: Some(album_clean),
                         year,
+                        structured_album_hierarchy: true,
                     };
                 }
             }
@@ -479,6 +675,7 @@ fn infer_from_folder_hierarchy(root: &Path, file_path: &Path) -> FolderHint {
                 artist: Some(single_dir.clone()),
                 album: None,
                 year: None,
+                structured_album_hierarchy: false,
             }
         }
         many => {
@@ -494,6 +691,7 @@ fn infer_from_folder_hierarchy(root: &Path, file_path: &Path) -> FolderHint {
                     Some(album_clean)
                 },
                 year,
+                structured_album_hierarchy: true,
             }
         }
     }
@@ -616,6 +814,109 @@ mod tests {
             .get("music has the right to children")
             .expect("Album inferred from folder");
         assert_eq!(mhtrtc.release_year, Some(1998));
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn prevents_multi_artist_tag_pollution_and_supports_folder_only_mode() {
+        let root = unique_temp_dir("collab");
+
+        // 1. Structured folder `<Artist>/<Album>/track` with comma-joined TrackArtist credits
+        write_tagged_mp3(
+            &root.join("Alligatoah/Schlaftabletten, Rotwein V/01_collab.mp3"),
+            &[
+                (ItemKey::TrackArtist, "Alligatoah, Jamal"),
+                (ItemKey::AlbumTitle, "Schlaftabletten, Rotwein V"),
+            ],
+        );
+        write_tagged_mp3(
+            &root.join("Alligatoah/Schlaftabletten, Rotwein V/02_collab.mp3"),
+            &[
+                (ItemKey::TrackArtist, "Alligatoah, Dima Richman"),
+                (ItemKey::AlbumTitle, "Schlaftabletten, Rotwein V"),
+            ],
+        );
+
+        // 2. Semicolon-delimited AlbumArtist tag (`Alottadogs; GLITTERMUTT`)
+        write_tagged_mp3(
+            &root.join("Singles/split_ep.mp3"),
+            &[
+                (ItemKey::AlbumArtist, "Alottadogs; GLITTERMUTT"),
+                (ItemKey::TrackArtist, "Alottadogs; GLITTERMUTT"),
+                (ItemKey::AlbumTitle, "Split Single"),
+            ],
+        );
+
+        // 3. Comma-delimited TrackArtist in a loose bucket folder (`Alexander Marcus, 257ers`)
+        write_tagged_mp3(
+            &root.join("Downloads/party.mp3"),
+            &[
+                (ItemKey::TrackArtist, "Alexander Marcus, 257ers"),
+                (ItemKey::AlbumTitle, "Pharao"),
+            ],
+        );
+
+        // 4. Genuine comma-containing artist (`Tyler, The Creator`) must NOT be split
+        write_tagged_mp3(
+            &root.join("Tyler, The Creator/IGOR/01_igor.mp3"),
+            &[
+                (ItemKey::AlbumArtist, "Tyler, The Creator"),
+                (ItemKey::TrackArtist, "Tyler, The Creator"),
+                (ItemKey::AlbumTitle, "IGOR"),
+            ],
+        );
+
+        let default_outcome = scan_library_folders_with_options(
+            std::slice::from_ref(&root),
+            &ScanOptions::default(),
+            None,
+            |_, _| {},
+        )
+        .unwrap();
+
+        assert!(default_outcome.artists.contains_key("alligatoah"));
+        assert!(!default_outcome.artists.contains_key("alligatoah jamal"));
+        assert!(!default_outcome
+            .artists
+            .contains_key("alligatoah dima richman"));
+        assert_eq!(default_outcome.artists["alligatoah"].track_count, 2);
+
+        assert!(default_outcome.artists.contains_key("alottadogs"));
+        assert!(!default_outcome
+            .artists
+            .contains_key("alottadogs glittermutt"));
+
+        assert!(default_outcome.artists.contains_key("alexander marcus"));
+        assert!(!default_outcome
+            .artists
+            .contains_key("alexander marcus 257ers"));
+
+        assert!(default_outcome.artists.contains_key("tyler the creator"));
+        assert_eq!(
+            default_outcome.artists["tyler the creator"].display_name,
+            "Tyler, The Creator"
+        );
+
+        // Now test strict `FolderOnly` mode: only structured non-bucket folders (`Alligatoah` and
+        // `Tyler, The Creator`) are discovered, ignoring `Singles` and `Downloads` bucket folders.
+        let folder_only_outcome = scan_library_folders_with_options(
+            std::slice::from_ref(&root),
+            &ScanOptions {
+                discovery_mode: ArtistDiscoveryMode::FolderOnly,
+                split_collaborations: true,
+                include_compilation_artists: false,
+            },
+            None,
+            |_, _| {},
+        )
+        .unwrap();
+
+        assert_eq!(folder_only_outcome.artists.len(), 2);
+        assert!(folder_only_outcome.artists.contains_key("alligatoah"));
+        assert!(folder_only_outcome
+            .artists
+            .contains_key("tyler the creator"));
 
         let _ = fs::remove_dir_all(&root);
     }

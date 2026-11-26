@@ -1,10 +1,13 @@
+mod audio_player;
 mod controller;
 mod folder_picker;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use missnix_core::{scan_library_folders, AppPaths, Database, ProgressEvent, SyncEngine};
+use missnix_core::{
+    scan_library_folders_with_options, AppPaths, Database, ProgressEvent, ScanOptions, SyncEngine,
+};
 use slint::ComponentHandle;
 
 slint::include_modules!();
@@ -119,13 +122,9 @@ fn run_headless_cli(
             .collect();
 
         println!("Scanning {} library folder(s)...", folders.len());
-        let outcome = scan_library_folders(
-            &folders,
-            settings.include_compilation_artists,
-            None,
-            |_, _| {},
-        )
-        .map_err(|e| e.to_string())?;
+        let scan_opts = ScanOptions::from_settings(&settings);
+        let outcome = scan_library_folders_with_options(&folders, &scan_opts, None, |_, _| {})
+            .map_err(|e| e.to_string())?;
         db.apply_scan_outcome(&outcome).map_err(|e| e.to_string())?;
         println!(
             "Scan complete: {} audio files -> {} artists, {} local albums indexed.",

@@ -169,6 +169,51 @@ impl ProviderMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum ArtistDiscoveryMode {
+    /// Prefer `ALBUMARTIST`, then structured `<Artist>/<Album>` folder names, then cleaned track `ARTIST`.
+    AlbumArtistOrFolder,
+    /// Infer artists strictly from `<MusicRoot>/<Artist>/<Album>` directory names.
+    FolderOnly,
+    /// Use `ALBUMARTIST`, then cleaned track `ARTIST`, then folder fallback.
+    AllTagsAndFolder,
+}
+
+impl ArtistDiscoveryMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::AlbumArtistOrFolder => "album_artist_or_folder",
+            Self::FolderOnly => "folder_only",
+            Self::AllTagsAndFolder => "all_tags_and_folder",
+        }
+    }
+
+    pub fn from_db(value: &str) -> Self {
+        match value {
+            "folder_only" => Self::FolderOnly,
+            "all_tags_and_folder" => Self::AllTagsAndFolder,
+            _ => Self::AlbumArtistOrFolder,
+        }
+    }
+
+    pub fn index(self) -> i32 {
+        match self {
+            Self::AlbumArtistOrFolder => 0,
+            Self::FolderOnly => 1,
+            Self::AllTagsAndFolder => 2,
+        }
+    }
+
+    pub fn from_index(index: i32) -> Self {
+        match index {
+            1 => Self::FolderOnly,
+            2 => Self::AllTagsAndFolder,
+            _ => Self::AlbumArtistOrFolder,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FeedSort {
     NewestFirst,
     UpcomingFirst,
@@ -290,6 +335,12 @@ impl ReleaseTrack {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     pub dark_mode: bool,
+    /// `0..=5` Material 3 tonal accent palette preset (`0` = Iris Violet).
+    pub accent_preset: u8,
+    /// `0` = Compact, `1` = Comfortable (default), `2` = Spacious.
+    pub grid_density: u8,
+    /// `0..=100` in-app 30s preview audio volume percentage.
+    pub preview_volume: u8,
     /// `0` means all time; otherwise number of days to look back (`90`, `180`, `365`, `730`).
     pub lookback_days: u32,
     pub include_albums: bool,
@@ -298,6 +349,8 @@ pub struct AppSettings {
     pub hide_owned_locally: bool,
     pub hide_compilations_and_live: bool,
     pub include_compilation_artists: bool,
+    pub artist_discovery_mode: ArtistDiscoveryMode,
+    pub split_collaborations: bool,
     /// `0` means manual check only; otherwise hours (`6`, `12`, `24`).
     pub auto_check_interval_hours: u32,
     pub provider_mode: ProviderMode,
@@ -307,6 +360,9 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             dark_mode: true,
+            accent_preset: 0,
+            grid_density: 1,
+            preview_volume: 80,
             lookback_days: 365,
             include_albums: true,
             include_eps: true,
@@ -314,6 +370,8 @@ impl Default for AppSettings {
             hide_owned_locally: true,
             hide_compilations_and_live: true,
             include_compilation_artists: false,
+            artist_discovery_mode: ArtistDiscoveryMode::AlbumArtistOrFolder,
+            split_collaborations: true,
             auto_check_interval_hours: 12,
             provider_mode: ProviderMode::DeezerAndMusicBrainz,
         }

@@ -65,17 +65,26 @@ pub fn normalize_artist_name(name: &str) -> String {
 /// Strip trailing featured-artist credits (`feat.`, `ft.`, `featuring`) when extracting
 /// primary artist identity from track-level artist tags.
 pub fn strip_featured_artists(raw: &str) -> String {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
+    let first_null = raw.split('\0').next().unwrap_or(raw).trim();
+    if first_null.is_empty() {
         return String::new();
     }
 
     // Remove parenthesized/bracketed feat clauses first, e.g. "Artist (feat. Someone)"
-    let mut cleaned = strip_matching_brackets(trimmed, is_feat_clause);
+    let mut cleaned = strip_matching_brackets(first_null, is_feat_clause);
 
     // Strip unbracketed " feat. ...", " ft. ...", " featuring ..."
     let lower = cleaned.to_lowercase();
-    for marker in [" feat. ", " feat ", " ft. ", " ft ", " featuring "] {
+    for marker in [
+        " feat. ",
+        " feat ",
+        " ft. ",
+        " ft ",
+        " featuring ",
+        " w/ ",
+        " pres. ",
+        " presents ",
+    ] {
         if let Some(idx) = lower.find(marker) {
             cleaned.truncate(idx);
             break;
@@ -83,6 +92,182 @@ pub fn strip_featured_artists(raw: &str) -> String {
     }
 
     collapse_whitespace(cleaned.trim_end_matches(['-', ',', ';', '/']))
+}
+
+/// Extract the primary artist from a tag or folder value that may contain multi-artist
+/// collaboration delimiters (`;`, `\0`, ` / `, `\\`, `feat.`, `vs.`, or `, `), while
+/// preserving genuine comma-containing band names (`Tyler, The Creator`, `Earth, Wind & Fire`,
+/// `Crosby, Stills & Nash`, `Black Country, New Road`, `AC/DC`) and honoring any matching
+/// folder artist hint (`folder_artist_hint`).
+pub fn extract_primary_artist(
+    raw: &str,
+    folder_artist_hint: Option<&str>,
+    split_collaborations: bool,
+) -> String {
+    let base = strip_featured_artists(raw);
+    if base.is_empty() {
+        return String::new();
+    }
+    if !split_collaborations {
+        return base;
+    }
+
+    let hint_clean = folder_artist_hint.map(strip_featured_artists).filter(|h| {
+        !h.is_empty() && !is_various_or_generic_artist(h) && !is_generic_bucket_folder(h)
+    });
+    let hint_norm = hint_clean.as_deref().map(fold_diacritics_and_symbols);
+
+    // If the parent folder is literally named the exact same full string (e.g. `/Music/Tyler, The Creator/`
+    // or `/Music/Black Country, New Road/`), preserve it intact unless it uses hard `;` tag separators.
+    if !base.contains(';') && !base.contains('\\') {
+        if let Some(ref hn) = hint_norm {
+            if !hn.is_empty() && fold_diacritics_and_symbols(&base) == *hn {
+                return base;
+            }
+        }
+    }
+
+    // 1. Hard multi-artist tag delimiters: `;`, `\`, ` // `, ` / ` (spaced so `AC/DC` stays intact), ` vs. `, ` vs `
+    let hard_parts = split_hard_artist_delimiters(&base);
+    if hard_parts.len() > 1 {
+        if let Some(ref hn) = hint_norm {
+            if let Some(matched) = hard_parts
+                .iter()
+                .find(|p| fold_diacritics_and_symbols(p) == *hn)
+            {
+                return (*matched).clone();
+            }
+        }
+        if let Some(first) = hard_parts
+            .into_iter()
+            .find(|p| !p.is_empty() && !is_various_or_generic_artist(p))
+        {
+            // Also check comma delimiters inside the first segment if any
+            return extract_comma_primary(&first, hint_norm.as_deref());
+        }
+    }
+
+    // 2. Comma-space collaboration credits (e.g. `"Alligatoah, Jamal"`, `"Alexander Marcus, 257ers"`)
+    extract_comma_primary(&base, hint_norm.as_deref())
+}
+
+fn split_hard_artist_delimiters(input: &str) -> Vec<String> {
+    let mut normalized_seps = input.replace([';', '\\', '\0'], "\x1f");
+    for sep in [" // ", " / ", " vs. ", " vs ", " VS. ", " VS "] {
+        normalized_seps = normalized_seps.replace(sep, "\x1f");
+    }
+    normalized_seps
+        .split('\x1f')
+        .map(strip_featured_artists)
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn extract_comma_primary(input: &str, hint_norm: Option<&str>) -> String {
+    if !input.contains(", ") || is_preserved_comma_artist_name(input) {
+        return collapse_whitespace(input);
+    }
+
+    let parts: Vec<String> = input
+        .split(", ")
+        .map(strip_featured_artists)
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if parts.len() <= 1 {
+        return collapse_whitespace(input);
+    }
+
+    if let Some(hn) = hint_norm {
+        if let Some(matched) = parts.iter().find(|p| fold_diacritics_and_symbols(p) == hn) {
+            return matched.clone();
+        }
+    }
+
+    parts
+        .into_iter()
+        .find(|p| !is_various_or_generic_artist(p))
+        .unwrap_or_else(|| collapse_whitespace(input))
+}
+
+/// Returns `true` for real artist/band names that legitimately contain `", "` so they
+/// are never split into fake partial names.
+pub fn is_preserved_comma_artist_name(name: &str) -> bool {
+    let trimmed = collapse_whitespace(name);
+    let lower = trimmed.to_lowercase();
+
+    // Multi-member ensembles ending with `&` or `and`, e.g. "Earth, Wind & Fire",
+    // "Crosby, Stills & Nash", "Emerson, Lake & Palmer", "Peter, Paul and Mary".
+    if lower.contains(" & ") || lower.contains(" and ") {
+        return true;
+    }
+
+    // "<Name>, The <Epithet>" such as "Tyler, The Creator" or "Chance, The Rapper"
+    if let Some((left, right)) = lower.split_once(", ") {
+        let left_words = left.split_whitespace().count();
+        let right_words = right.split_whitespace().count();
+        if !right.contains(", ")
+            && (right.starts_with("the ")
+                || right == "jr."
+                || right == "jr"
+                || right == "sr."
+                || right == "ii"
+                || right == "iii")
+            && left_words <= 2
+            && right_words <= 3
+        {
+            return true;
+        }
+    }
+
+    let folded = fold_diacritics_and_symbols(&trimmed);
+    matches!(
+        folded.as_str(),
+        "black country new road"
+            | "now now"
+            | "hey nothing"
+            | "oh sleeper"
+            | "goodbye june"
+            | "hello meteor"
+            | "mewithoutyou"
+            | "dexys midnight runners"
+    )
+}
+
+/// Detect generic non-artist bucket folder names (`Downloads`, `Singles`, `Unsorted`, `OST`, etc.)
+/// so folder-based discovery does not treat top-level dump directories as artist names.
+pub fn is_generic_bucket_folder(name: &str) -> bool {
+    let norm = fold_diacritics_and_symbols(name);
+    matches!(
+        norm.as_str(),
+        "" | "music"
+            | "my music"
+            | "audio"
+            | "downloads"
+            | "download"
+            | "singles"
+            | "single"
+            | "albums"
+            | "album"
+            | "tracks"
+            | "unsorted"
+            | "misc"
+            | "miscellaneous"
+            | "compilations"
+            | "compilation"
+            | "soundtracks"
+            | "soundtrack"
+            | "ost"
+            | "messy dump"
+            | "incoming"
+            | "new"
+            | "temp"
+            | "tmp"
+            | "flac"
+            | "mp3"
+            | "lossless"
+            | "rips"
+    ) || is_various_or_generic_artist(name)
 }
 
 /// Detect generic compilation / placeholder artist tags that shouldn't become tracked artists.
@@ -469,5 +654,57 @@ mod tests {
         assert_eq!(epoch_secs_to_iso_date(0), "1970-01-01");
         // 2026-11-26 00:00:00 UTC = 20783 days * 86400 = 1795651200
         assert_eq!(epoch_secs_to_iso_date(1_795_651_200), "2026-11-26");
+    }
+
+    #[test]
+    fn extracts_primary_artist_from_multi_artist_delimiters_without_breaking_bands() {
+        // Real-world semicolon & comma collaboration tags
+        assert_eq!(
+            extract_primary_artist("Alottadogs; GLITTERMUTT", None, true),
+            "Alottadogs"
+        );
+        assert_eq!(
+            extract_primary_artist("Alottadogs; GLITTERMUTT", Some("GLITTERMUTT"), true),
+            "GLITTERMUTT"
+        );
+        assert_eq!(
+            extract_primary_artist("Alligatoah, Jamal", None, true),
+            "Alligatoah"
+        );
+        assert_eq!(
+            extract_primary_artist("Alligatoah, Dima Richman", Some("Alligatoah"), true),
+            "Alligatoah"
+        );
+        assert_eq!(
+            extract_primary_artist("Alexander Marcus, 257ers", None, true),
+            "Alexander Marcus"
+        );
+        assert_eq!(
+            extract_primary_artist("Kanye West / Jay-Z", None, true),
+            "Kanye West"
+        );
+
+        // Genuine band names with slashes or commas must stay intact
+        assert_eq!(extract_primary_artist("AC/DC", None, true), "AC/DC");
+        assert_eq!(
+            extract_primary_artist("Tyler, The Creator", None, true),
+            "Tyler, The Creator"
+        );
+        assert_eq!(
+            extract_primary_artist("Earth, Wind & Fire", None, true),
+            "Earth, Wind & Fire"
+        );
+        assert_eq!(
+            extract_primary_artist("Crosby, Stills & Nash", None, true),
+            "Crosby, Stills & Nash"
+        );
+        assert_eq!(
+            extract_primary_artist("Black Country, New Road", None, true),
+            "Black Country, New Road"
+        );
+        assert_eq!(
+            extract_primary_artist("10,000 Maniacs", None, true),
+            "10,000 Maniacs"
+        );
     }
 }

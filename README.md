@@ -6,21 +6,22 @@
 
 ## Key Capabilities
 
-- **Local Music Artist Discovery (`lofty` + folder fallback)**
+- **Local Music Artist Discovery (`lofty` + configurable `ALBUMARTIST` / Folder modes)**
   - Recursively scans FLAC, MP3, Ogg Vorbis, Opus, M4A/MP4, WAV, AIFF, AAC, APE, and WavPack files.
-  - Prioritizes `ALBUMARTIST` / `MusicBrainz Album Artist Id` over track `ARTIST` to prevent guest-feature pollution, automatically skipping `Various Artists` / soundtracks unless opted in.
-  - Falls back cleanly to `<Artist>/<Year - Album>/<Track>` folder conventions when embedded tags are missing.
+  - Configurable discovery source (**Album Artist + Folder [Default]**, **Folder Structure Only**, or **All Metadata Tags + Folder**) plus intelligent multi-artist collaboration delimiter parsing (`;`, `/`, `feat.`, `, `) so combined credits never create fake duplicate artists, while preserving genuine comma/slash band names (`Tyler, The Creator`, `Earth, Wind & Fire`, `AC/DC`).
+  - Automatically prunes stale zero-track local entries on rescan while preserving manual artists and muted/ignored preferences.
+- **Native In-App 30-Second Audio Preview Player**
+  - Decodes Deezer 30s MP3 previews in pure Rust (`nanomp3`) with local disk caching, automatic expired CDN token refresh, and low-latency native audio output via PulseAudio / PipeWire (`libpulse-simple`), ALSA (`libasound`), or system audio fallback — right inside a docked Material 3 Mini-Player with seek, volume control, and live equalizer bars.
 - **Persistent SQLite State (`rusqlite`)**
   - Stores library folders, discovered & manual artists, indexed local albums, remote releases, cached tracklists, and preferences in `$XDG_DATA_HOME/missnix/missnix.db` (WAL mode).
   - Remembers `unseen`, `seen`, and `dismissed` release states as well as `tracked`, `muted`, and `ignored` artist states across restarts and rescans.
 - **Dual-Provider Release Radar (Deezer + MusicBrainz)**
-  - **Deezer API** provides fast artist search, discography lookups, high-resolution cover artwork, explicit badges, tracklists, and 30-second audio preview links with zero API keys.
+  - **Deezer API** provides fast artist search, artist portraits, discography lookups, high-resolution cover artwork, explicit badges, tracklists, and 30-second audio previews with zero API keys.
   - **MusicBrainz API + Cover Art Archive** resolves canonical MBIDs (including embedded `MusicBrainz Artist Id` tags from Picard/beets), extracts linked Deezer artist URLs, and cross-checks release groups so indie/Bandcamp-first releases aren't missed.
   - Disambiguates artist homonyms by scoring candidate discographies against the albums you already own locally, collapses duplicate Deluxe/Remastered/Regional editions, and flags locally owned albums automatically.
-- **Responsive Slint Material Desktop UI**
-  - Built with Slint's Material component library (`material-dark` / `material-light` runtime theme switching).
-  - Multi-pane layout: left navigation rail with live background scan/sync progress & cancellation, responsive cover-art grid (**New Drops** & **All Releases**), right-hand **Release Inspector** with tracklist and external links, **Tracked Artists** master-detail manager with provider ID overrides & online artist search, and **Library & Settings**.
-  - All filesystem scanning, HTTP provider lookups, and cover-art thumbnail decoding run on background worker threads.
+- **Material 3 for Desktop UI & Customization**
+  - Custom vector SVG icon system & dynamic animated radar emblem, Dark/Light Material 3 surface containers, 6 live accent color palettes (**Iris**, **Frost**, **Emerald**, **Amber**, **Coral**, **Copper**), and configurable cover-grid density (**Compact**, **Comfortable**, **Spacious**).
+  - Bounded Material 3 pill buttons, filter chips, labeled inputs, smooth drawer/navigation animations, and responsive max-width containers across compact laptops and ultrawide monitors.
 
 ---
 

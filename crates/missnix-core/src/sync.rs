@@ -17,6 +17,8 @@ use crate::providers::ArtistSearchCandidate;
 pub struct AppPaths {
     pub db_path: PathBuf,
     pub cover_cache_dir: PathBuf,
+    pub avatar_cache_dir: PathBuf,
+    pub preview_cache_dir: PathBuf,
 }
 
 impl AppPaths {
@@ -30,18 +32,19 @@ impl AppPaths {
                 .join("missnix.db")
         };
 
-        let cover_cache_dir = if let Ok(custom_cache) = std::env::var("MISSNIX_CACHE_DIR") {
-            PathBuf::from(custom_cache).join("covers")
+        let base_cache = if let Ok(custom_cache) = std::env::var("MISSNIX_CACHE_DIR") {
+            PathBuf::from(custom_cache)
         } else {
             dirs::cache_dir()
                 .unwrap_or_else(|| PathBuf::from(".cache"))
                 .join("missnix")
-                .join("covers")
         };
 
         Self {
             db_path,
-            cover_cache_dir,
+            cover_cache_dir: base_cache.join("covers"),
+            avatar_cache_dir: base_cache.join("avatars"),
+            preview_cache_dir: base_cache.join("previews"),
         }
     }
 }
@@ -370,17 +373,102 @@ impl SyncEngine {
         Ok(Some(dest))
     }
 
-    /// Return cached tracks for `release`, or fetch from Deezer / MusicBrainz and persist them.
+    /// Cache an artist's circular portrait thumbnail (`avatar_url`) locally on disk.
+    pub fn ensure_artist_avatar_cached(
+        &self,
+        avatar_cache_dir: &Path,
+        artist: &Artist,
+    ) -> CoreResult<Option<PathBuf>> {
+        for ext in ["jpg", "png", "webp"] {
+            let existing = avatar_cache_dir.join(format!("artist_{}.{}", artist.id, ext));
+            if existing.is_file() {
+                return Ok(Some(existing));
+            }
+        }
+
+        let Some(ref url) = artist.avatar_url else {
+            return Ok(None);
+        };
+        if url.is_empty() {
+            return Ok(None);
+        }
+
+        fs::create_dir_all(avatar_cache_dir).map_err(|source| CoreError::Io {
+            path: avatar_cache_dir.to_path_buf(),
+            source,
+        })?;
+
+        let bytes = self.deezer.download_bytes(url)?;
+        let Some(ext) = detect_image_extension(&bytes) else {
+            return Ok(None);
+        };
+
+        let dest = avatar_cache_dir.join(format!("artist_{}.{}", artist.id, ext));
+        fs::write(&dest, &bytes).map_err(|source| CoreError::Io {
+            path: dest.clone(),
+            source,
+        })?;
+        Ok(Some(dest))
+    }
+
+    /// Download and cache a 30-second MP3 preview buffer on disk so replays are instant.
+    pub fn fetch_preview_mp3_cached(
+        &self,
+        preview_cache_dir: &Path,
+        cache_key: &str,
+        url: &str,
+    ) -> CoreResult<Vec<u8>> {
+        let dest = preview_cache_dir.join(format!("{cache_key}.mp3"));
+        if let Ok(bytes) = fs::read(&dest) {
+            if bytes.len() > 1024 {
+                return Ok(bytes);
+            }
+        }
+
+        fs::create_dir_all(preview_cache_dir).map_err(|source| CoreError::Io {
+            path: preview_cache_dir.to_path_buf(),
+            source,
+        })?;
+
+        let bytes = self.deezer.download_bytes(url)?;
+        if bytes.len() > 1024 {
+            let _ = fs::write(&dest, &bytes);
+        }
+        Ok(bytes)
+    }
+
+    /// Return cached tracks for `release` (refreshing automatically if Deezer CDN preview
+    /// tokens have expired), or fetch from Deezer / MusicBrainz and persist them.
     pub fn fetch_and_cache_release_tracks(
         &self,
         db: &mut Database,
         release: &Release,
     ) -> CoreResult<Vec<ReleaseTrack>> {
         let cached = db.list_release_tracks(release.id)?;
-        if !cached.is_empty() {
+        let has_expired_preview = cached.iter().any(|t| {
+            t.preview_url
+                .as_deref()
+                .is_some_and(is_deezer_preview_url_expired)
+        });
+
+        if !cached.is_empty() && !has_expired_preview {
             return Ok(cached);
         }
 
+        match self.refresh_release_tracks(db, release) {
+            Ok(fresh) if !fresh.is_empty() => Ok(fresh),
+            Ok(_) if !cached.is_empty() => Ok(cached),
+            Err(_) if !cached.is_empty() => Ok(cached),
+            other => other,
+        }
+    }
+
+    /// Force-refresh release tracks from Deezer / MusicBrainz and update SQLite.
+    pub fn refresh_release_tracks(
+        &self,
+        db: &mut Database,
+        release: &Release,
+    ) -> CoreResult<Vec<ReleaseTrack>> {
         if let Some(dz_album_id) = release.deezer_album_id {
             if let Ok(tracks) = self.deezer.fetch_album_tracks(dz_album_id) {
                 if !tracks.is_empty() {
@@ -454,6 +542,23 @@ pub fn detect_image_extension(bytes: &[u8]) -> Option<&'static str> {
 
 pub fn check_cache_dir_exists(path: &Path) -> bool {
     path.is_dir()
+}
+
+/// Detect whether a signed Deezer CDN preview URL (`?hdnea=exp=<unix>~...`) has expired.
+pub fn is_deezer_preview_url_expired(url: &str) -> bool {
+    let Some(idx) = url.find("exp=") else {
+        return false;
+    };
+    let rest = &url[idx + 4..];
+    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let Ok(exp_secs) = digits.parse::<u64>() else {
+        return false;
+    };
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    now_secs.saturating_add(60) >= exp_secs
 }
 
 #[cfg(test)]

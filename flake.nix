@@ -40,6 +40,8 @@
               pkgs.libxi
               pkgs.libxrandr
               pkgs.libxxf86vm
+              pkgs.libpulseaudio
+              pkgs.alsa-lib
             ];
 
           desktopItem = pkgs.makeDesktopItem {
@@ -176,6 +178,8 @@
               pkgs.libxcursor
               pkgs.libxi
               pkgs.libxrandr
+              pkgs.libpulseaudio
+              pkgs.alsa-lib
             ];
         in
         {

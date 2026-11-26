@@ -48,7 +48,13 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Fetch locked dependencies for offline verification
-        run: cargo fetch --locked
+        run: |
+          set -o pipefail
+          if ! cargo fetch --locked 2>&1 | tee /tmp/fetch.log; then
+            MSG=$(sed 's/\x1b\[[0-9;]*m//g' /tmp/fetch.log | tail -n 25 | cut -c1-240 | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')
+            echo "::error title=cargo fetch failed::${MSG}"
+            exit 1
+          fi
 
       - name: Run Clippy (-D warnings)
         run: |
@@ -69,7 +75,13 @@ jobs:
           fi
 
       - name: Build full workspace and Slint GUI binary
-        run: cargo build --workspace --offline --locked
+        run: |
+          set -o pipefail
+          if ! cargo build --workspace --offline --locked 2>&1 | tee /tmp/build.log; then
+            MSG=$(sed 's/\x1b\[[0-9;]*m//g' /tmp/build.log | tail -n 35 | cut -c1-240 | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')
+            echo "::error title=cargo build failed::${MSG}"
+            exit 1
+          fi
 
       - name: Run headless CLI smoke test
         run: |

@@ -1,24 +1,63 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
   <defs>
-    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#1E1B2E"/>
-      <stop offset="100%" stop-color="#12131C"/>
+    <linearGradient id="surface" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#221E33"/>
+      <stop offset="55%" stop-color="#151320"/>
+      <stop offset="100%" stop-color="#0E0D15"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#584D7A" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#2A263B" stop-opacity="0.5"/>
+    </linearGradient>
+    <linearGradient id="sweep" x1="15%" y1="85%" x2="90%" y2="10%">
+      <stop offset="0%" stop-color="#7F67BE" stop-opacity="0.04"/>
+      <stop offset="55%" stop-color="#B69DF8" stop-opacity="0.24"/>
+      <stop offset="100%" stop-color="#EADDFF" stop-opacity="0.58"/>
     </linearGradient>
     <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#D0BCFF"/>
-      <stop offset="100%" stop-color="#7F67BE"/>
+      <stop offset="0%" stop-color="#EADDFF"/>
+      <stop offset="50%" stop-color="#D0BCFF"/>
+      <stop offset="100%" stop-color="#9A82DB"/>
     </linearGradient>
+    <radialGradient id="beaconGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#EADDFF" stop-opacity="1"/>
+      <stop offset="45%" stop-color="#D0BCFF" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#D0BCFF" stop-opacity="0"/>
+    </radialGradient>
   </defs>
-  <rect x="12" y="12" width="232" height="232" rx="56" fill="url(#bg)" stroke="#38344C" stroke-width="4"/>
-  <!-- Vinyl / Radar rings -->
-  <circle cx="128" cy="128" r="82" fill="none" stroke="#4A4458" stroke-width="6"/>
-  <circle cx="128" cy="128" r="58" fill="none" stroke="#625B71" stroke-width="5" stroke-dasharray="140 44"/>
-  <circle cx="128" cy="128" r="34" fill="none" stroke="url(#accent)" stroke-width="6"/>
-  <!-- Radar sweep -->
-  <path d="M128 128 L186 70 A82 82 0 0 1 210 128 Z" fill="#D0BCFF" fill-opacity="0.22"/>
-  <line x1="128" y1="128" x2="186" y2="70" stroke="#D0BCFF" stroke-width="5" stroke-linecap="round"/>
-  <!-- Center spindle & new release pulse dot -->
-  <circle cx="128" cy="128" r="11" fill="#E6E0E9"/>
-  <circle cx="174" cy="82" r="9" fill="#D0BCFF"/>
-  <circle cx="174" cy="82" r="15" fill="none" stroke="#D0BCFF" stroke-opacity="0.45" stroke-width="3"/>
+
+  <!-- Material 3 Squircle Container -->
+  <rect x="14" y="14" width="228" height="228" rx="58" fill="url(#surface)" stroke="url(#rim)" stroke-width="3.5"/>
+
+  <!-- Subtle outer vinyl sheen -->
+  <circle cx="128" cy="128" r="92" fill="#1A1728" stroke="#352F49" stroke-width="2.5"/>
+
+  <!-- Concentric Radar / Vinyl Grooves -->
+  <circle cx="128" cy="128" r="78" fill="none" stroke="#494163" stroke-width="2" stroke-dasharray="12 8"/>
+  <circle cx="128" cy="128" r="62" fill="none" stroke="#5D537D" stroke-width="2.5" stroke-dasharray="96 28"/>
+  <circle cx="128" cy="128" r="44" fill="none" stroke="url(#accent)" stroke-width="3" stroke-opacity="0.65"/>
+
+  <!-- Crosshair subtle ticks -->
+  <line x1="128" y1="36" x2="128" y2="48" stroke="#584E76" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="128" y1="208" x2="128" y2="220" stroke="#584E76" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="36" y1="128" x2="48" y2="128" stroke="#584E76" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="208" y1="128" x2="220" y2="128" stroke="#584E76" stroke-width="2.5" stroke-linecap="round"/>
+
+  <!-- Dynamic Radar Sweep Wedge -->
+  <path d="M128 128 L193 63 A92 92 0 0 1 220 128 Z" fill="url(#sweep)"/>
+  <line x1="128" y1="128" x2="193" y2="63" stroke="url(#accent)" stroke-width="4.5" stroke-linecap="round"/>
+
+  <!-- Discovered Release Beacon Blip -->
+  <circle cx="176" cy="80" r="22" fill="url(#beaconGlow)"/>
+  <circle cx="176" cy="80" r="7.5" fill="#FFFFFF"/>
+  <circle cx="176" cy="80" r="12.5" fill="none" stroke="#EADDFF" stroke-width="2" stroke-opacity="0.75"/>
+
+  <!-- Secondary subtle blip -->
+  <circle cx="92" cy="86" r="4.5" fill="#88C0D0" fill-opacity="0.9"/>
+  <circle cx="92" cy="86" r="9" fill="none" stroke="#88C0D0" stroke-width="1.5" stroke-opacity="0.4"/>
+
+  <!-- Nix-inspired Hex Vinyl Spindle Label -->
+  <circle cx="128" cy="128" r="24" fill="#2B2440" stroke="url(#accent)" stroke-width="3"/>
+  <polygon points="128,113 141,120.5 141,135.5 128,143 115,135.5 115,120.5" fill="none" stroke="#EADDFF" stroke-width="2.2" stroke-linejoin="round"/>
+  <circle cx="128" cy="128" r="5.5" fill="#F5EFFB"/>
 </svg>
