@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use missnix_core::{
-    scan_library_folders_with_options, AppPaths, Database, ProgressEvent, ScanOptions, SyncEngine,
+    AppPaths, Database, ProgressEvent, ScanOptions, SyncEngine, scan_library_folders_with_options,
 };
 use slint::ComponentHandle;
 

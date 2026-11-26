@@ -8,7 +8,7 @@ use crate::db::{DiscoveredReleaseInput, DiscoveredTrackInput};
 use crate::error::{CoreError, CoreResult};
 use crate::models::ReleaseType;
 use crate::normalize::{is_noisy_release_title, normalize_artist_name, normalize_release_title};
-use crate::providers::{url_encode_query, ArtistSearchCandidate, USER_AGENT};
+use crate::providers::{ArtistSearchCandidate, USER_AGENT, url_encode_query};
 
 const DEFAULT_MB_BASE: &str = "https://musicbrainz.org/ws/2";
 const DEFAULT_CAA_BASE: &str = "https://coverartarchive.org";
@@ -394,12 +394,13 @@ impl MusicBrainzClient {
                 .call();
             match result {
                 Ok(mut resp) => {
-                    return resp.body_mut().read_json().map_err(|e| {
-                        CoreError::InvalidResponse {
+                    return resp
+                        .body_mut()
+                        .read_json()
+                        .map_err(|e| CoreError::InvalidResponse {
                             provider: "musicbrainz",
                             message: e.to_string(),
-                        }
-                    });
+                        });
                 }
                 Err(ureq::Error::StatusCode(503 | 429)) if attempt < 2 => {
                     thread::sleep(backoff);

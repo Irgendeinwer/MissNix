@@ -15,6 +15,6 @@ pub use models::{
 };
 pub use providers::ArtistSearchCandidate;
 pub use scanner::{
-    scan_library_folders, scan_library_folders_with_options, ScanOptions, ScanOutcome,
+    ScanOptions, ScanOutcome, scan_library_folders, scan_library_folders_with_options,
 };
-pub use sync::{is_deezer_preview_url_expired, AppPaths, SyncEngine};
+pub use sync::{AppPaths, SyncEngine, is_deezer_preview_url_expired};

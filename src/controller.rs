@@ -3,16 +3,16 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use missnix_core::normalize::{days_ago_iso_utc, today_iso_utc};
 use missnix_core::{
-    is_deezer_preview_url_expired, scan_library_folders_with_options, AppPaths, AppSettings,
-    Artist, ArtistDiscoveryMode, ArtistSearchCandidate, ArtistSource, ArtistStatus, CoreError,
-    Database, FeedQuery, FeedSort, ProgressEvent, ProviderMode, Release, ReleaseState,
-    ReleaseTrack, ReleaseType, ScanOptions, ScanOutcome, SyncEngine,
+    AppPaths, AppSettings, Artist, ArtistDiscoveryMode, ArtistSearchCandidate, ArtistSource,
+    ArtistStatus, CoreError, Database, FeedQuery, FeedSort, ProgressEvent, ProviderMode, Release,
+    ReleaseState, ReleaseTrack, ReleaseType, ScanOptions, ScanOutcome, SyncEngine,
+    is_deezer_preview_url_expired, scan_library_folders_with_options,
 };
 use slint::platform::WindowEvent;
 use slint::{
@@ -354,11 +354,11 @@ pub fn wire_controller(
                 let _ = guard.db.set_release_state(rel.id, next_state);
                 refresh_folders_and_stats(&win, &guard);
                 refresh_feed(&win, &mut guard);
-                if win.get_selected_release_id() == rel_id {
-                    if let Ok(Some(updated)) = guard.db.get_release(rel.id) {
-                        let card = to_release_card(&updated, guard.decoded_covers.get(&updated.id));
-                        win.set_selected_release(card);
-                    }
+                if win.get_selected_release_id() == rel_id
+                    && let Ok(Some(updated)) = guard.db.get_release(rel.id)
+                {
+                    let card = to_release_card(&updated, guard.decoded_covers.get(&updated.id));
+                    win.set_selected_release(card);
                 }
             }
         });
@@ -410,13 +410,12 @@ pub fn wire_controller(
         let weak = app.as_weak();
         app.on_open_external_url(move |url| {
             let u = url.trim();
-            if u.starts_with("https://") || u.starts_with("http://") {
-                if let Err(err) = open::that_detached(u) {
-                    if let Some(win) = weak.upgrade() {
-                        win.set_status_is_warning(true);
-                        win.set_status_banner_text(format!("Could not open browser: {err}").into());
-                    }
-                }
+            if (u.starts_with("https://") || u.starts_with("http://"))
+                && let Err(err) = open::that_detached(u)
+                && let Some(win) = weak.upgrade()
+            {
+                win.set_status_is_warning(true);
+                win.set_status_banner_text(format!("Could not open browser: {err}").into());
             }
         });
     }
@@ -951,11 +950,7 @@ fn apply_ui_scale_to_window(win: &AppWindow, state: &mut UiState, scale_pct: u16
 
     let base = *state.base_scale_factor.get_or_insert_with(|| {
         let sf = win.window().scale_factor();
-        if sf > 0.0 {
-            sf
-        } else {
-            1.0
-        }
+        if sf > 0.0 { sf } else { 1.0 }
     });
 
     let effective = (base * (f32::from(clamped) / 100.0)).clamp(0.5, 4.0);
@@ -1293,10 +1288,10 @@ fn open_release_inspector(win: &AppWindow, state: &Rc<RefCell<UiState>>, release
                 return;
             }
             win.set_loading_tracks(false);
-            if let Ok(tracks) = fetched {
-                if !tracks.is_empty() {
-                    win.set_selected_release_tracks(tracks_to_model(&tracks));
-                }
+            if let Ok(tracks) = fetched
+                && !tracks.is_empty()
+            {
+                win.set_selected_release_tracks(tracks_to_model(&tracks));
             }
         });
     });
@@ -1337,7 +1332,8 @@ fn spawn_image_worker(
                         let slint_img = Image::from_rgba8(buf);
 
                         UI_STATE_SLOT.with(|slot| {
-                            let Some(rc_st) = slot.borrow().as_ref().and_then(std::rc::Weak::upgrade)
+                            let Some(rc_st) =
+                                slot.borrow().as_ref().and_then(std::rc::Weak::upgrade)
                             else {
                                 return;
                             };
@@ -1347,13 +1343,13 @@ fn spawn_image_worker(
 
                             let row_count = guard.release_model.row_count();
                             for idx in 0..row_count {
-                                if let Some(mut row) = guard.release_model.row_data(idx) {
-                                    if row.id == rel_id as i32 {
-                                        row.cover = slint_img.clone();
-                                        row.has_cover = true;
-                                        guard.release_model.set_row_data(idx, row);
-                                        break;
-                                    }
+                                if let Some(mut row) = guard.release_model.row_data(idx)
+                                    && row.id == rel_id as i32
+                                {
+                                    row.cover = slint_img.clone();
+                                    row.has_cover = true;
+                                    guard.release_model.set_row_data(idx, row);
+                                    break;
                                 }
                             }
 
@@ -1389,7 +1385,8 @@ fn spawn_image_worker(
                         let slint_img = Image::from_rgba8(buf);
 
                         UI_STATE_SLOT.with(|slot| {
-                            let Some(rc_st) = slot.borrow().as_ref().and_then(std::rc::Weak::upgrade)
+                            let Some(rc_st) =
+                                slot.borrow().as_ref().and_then(std::rc::Weak::upgrade)
                             else {
                                 return;
                             };
@@ -1399,23 +1396,23 @@ fn spawn_image_worker(
 
                             let row_count = guard.artist_model.row_count();
                             for idx in 0..row_count {
-                                if let Some(mut row) = guard.artist_model.row_data(idx) {
-                                    if row.id == art_id as i32 {
-                                        row.avatar = slint_img.clone();
-                                        row.has_avatar = true;
-                                        guard.artist_model.set_row_data(idx, row);
-                                        break;
-                                    }
+                                if let Some(mut row) = guard.artist_model.row_data(idx)
+                                    && row.id == art_id as i32
+                                {
+                                    row.avatar = slint_img.clone();
+                                    row.has_avatar = true;
+                                    guard.artist_model.set_row_data(idx, row);
+                                    break;
                                 }
                             }
 
-                            if let Some(win) = weak_win.upgrade() {
-                                if win.get_selected_artist_id() == art_id as i32 {
-                                    let mut sel = win.get_selected_artist();
-                                    sel.avatar = slint_img;
-                                    sel.has_avatar = true;
-                                    win.set_selected_artist(sel);
-                                }
+                            if let Some(win) = weak_win.upgrade()
+                                && win.get_selected_artist_id() == art_id as i32
+                            {
+                                let mut sel = win.get_selected_artist();
+                                sel.avatar = slint_img;
+                                sel.has_avatar = true;
+                                win.set_selected_artist(sel);
                             }
                         });
                     });
@@ -1812,11 +1809,7 @@ fn make_monogram(name: &str) -> String {
 }
 
 fn pluralize<'a>(count: i64, singular: &'a str, plural: &'a str) -> &'a str {
-    if count == 1 {
-        singular
-    } else {
-        plural
-    }
+    if count == 1 { singular } else { plural }
 }
 
 fn compact_timestamp(rfc3339: &str, today_iso: &str) -> String {

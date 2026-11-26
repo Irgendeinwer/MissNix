@@ -119,24 +119,24 @@ pub fn extract_primary_artist(
 
     // If the parent folder is literally named the exact same full string (e.g. `/Music/Tyler, The Creator/`
     // or `/Music/Black Country, New Road/`), preserve it intact unless it uses hard `;` tag separators.
-    if !base.contains(';') && !base.contains('\\') {
-        if let Some(ref hn) = hint_norm {
-            if !hn.is_empty() && fold_diacritics_and_symbols(&base) == *hn {
-                return base;
-            }
-        }
+    if !base.contains(';')
+        && !base.contains('\\')
+        && let Some(ref hn) = hint_norm
+        && !hn.is_empty()
+        && fold_diacritics_and_symbols(&base) == *hn
+    {
+        return base;
     }
 
     // 1. Hard multi-artist tag delimiters: `;`, `\`, ` // `, ` / ` (spaced so `AC/DC` stays intact), ` vs. `, ` vs `
     let hard_parts = split_hard_artist_delimiters(&base);
     if hard_parts.len() > 1 {
-        if let Some(ref hn) = hint_norm {
-            if let Some(matched) = hard_parts
+        if let Some(ref hn) = hint_norm
+            && let Some(matched) = hard_parts
                 .iter()
                 .find(|p| fold_diacritics_and_symbols(p) == *hn)
-            {
-                return (*matched).clone();
-            }
+        {
+            return (*matched).clone();
         }
         if let Some(first) = hard_parts
             .into_iter()
@@ -178,10 +178,10 @@ fn extract_comma_primary(input: &str, hint_norm: Option<&str>) -> String {
         return collapse_whitespace(input);
     }
 
-    if let Some(hn) = hint_norm {
-        if let Some(matched) = parts.iter().find(|p| fold_diacritics_and_symbols(p) == hn) {
-            return matched.clone();
-        }
+    if let Some(hn) = hint_norm
+        && let Some(matched) = parts.iter().find(|p| fold_diacritics_and_symbols(p) == hn)
+    {
+        return matched.clone();
     }
 
     parts

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use rusqlite::types::ValueRef;
-use rusqlite::{params, params_from_iter, Connection, OptionalExtension, ToSql};
+use rusqlite::{Connection, OptionalExtension, ToSql, params, params_from_iter};
 
 const SCHEMA_VERSION: i32 = 2;
 
@@ -1248,10 +1248,10 @@ pub fn expand_tilde(path: &str) -> String {
         if let Some(home) = dirs::home_dir() {
             return home.join(rest).to_string_lossy().to_string();
         }
-    } else if path == "~" {
-        if let Some(home) = dirs::home_dir() {
-            return home.to_string_lossy().to_string();
-        }
+    } else if path == "~"
+        && let Some(home) = dirs::home_dir()
+    {
+        return home.to_string_lossy().to_string();
     }
     path.to_string()
 }

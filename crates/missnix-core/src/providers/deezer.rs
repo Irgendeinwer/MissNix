@@ -8,7 +8,7 @@ use crate::db::{DiscoveredReleaseInput, DiscoveredTrackInput};
 use crate::error::{CoreError, CoreResult};
 use crate::models::ReleaseType;
 use crate::normalize::{is_noisy_release_title, normalize_artist_name, normalize_release_title};
-use crate::providers::{url_encode_query, ArtistSearchCandidate, USER_AGENT};
+use crate::providers::{ArtistSearchCandidate, USER_AGENT, url_encode_query};
 
 const DEFAULT_DEEZER_BASE: &str = "https://api.deezer.com";
 
@@ -236,13 +236,13 @@ impl DeezerClient {
         let mut best: Option<(usize, u64, ArtistSearchCandidate)> = None;
         for cand in exact.into_iter().take(4) {
             let mut overlap = 0usize;
-            if let Some(dz_id) = cand.deezer_id {
-                if let Ok(albums) = self.fetch_raw_artist_albums(dz_id, 1) {
-                    for alb in albums {
-                        let n = normalize_release_title(&alb.title);
-                        if !n.is_empty() && local_normalized_albums.contains(&n) {
-                            overlap += 1;
-                        }
+            if let Some(dz_id) = cand.deezer_id
+                && let Ok(albums) = self.fetch_raw_artist_albums(dz_id, 1)
+            {
+                for alb in albums {
+                    let n = normalize_release_title(&alb.title);
+                    if !n.is_empty() && local_normalized_albums.contains(&n) {
+                        overlap += 1;
                     }
                 }
             }

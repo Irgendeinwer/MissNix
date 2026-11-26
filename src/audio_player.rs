@@ -1,12 +1,12 @@
 use std::ffi::{c_char, c_int, c_long, c_uint, c_ulong, c_void};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
+use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use missnix_core::{is_deezer_preview_url_expired, AppPaths, Database, SyncEngine};
+use missnix_core::{AppPaths, Database, SyncEngine, is_deezer_preview_url_expired};
 
 #[derive(Debug, Clone)]
 pub struct PreviewRequest {
@@ -177,19 +177,18 @@ fn run_audio_worker<F>(
             match cmd {
                 PreviewCommand::Play(req) => {
                     // If clicking the exact same track that's already loaded, toggle pause/resume!
-                    if let Some(ref mut cur) = session {
-                        if cur.req.release_id == req.release_id
-                            && cur.req.disc_number == req.disc_number
-                            && cur.req.track_number == req.track_number
-                        {
-                            cur.paused = !cur.paused;
-                            if cur.paused {
-                                cur.sink.flush();
-                                cur.smoothed_level = 0.0;
-                            }
-                            emit_session_update(cur, &on_update);
-                            continue;
+                    if let Some(ref mut cur) = session
+                        && cur.req.release_id == req.release_id
+                        && cur.req.disc_number == req.disc_number
+                        && cur.req.track_number == req.track_number
+                    {
+                        cur.paused = !cur.paused;
+                        if cur.paused {
+                            cur.sink.flush();
+                            cur.smoothed_level = 0.0;
                         }
+                        emit_session_update(cur, &on_update);
+                        continue;
                     }
 
                     // Drop previous audio sink immediately
@@ -303,47 +302,47 @@ fn run_audio_worker<F>(
         let mut finished = false;
         let mut sink_err: Option<String> = None;
 
-        if let Some(ref mut cur) = session {
-            if !cur.paused {
-                let ch = usize::from(cur.pcm.channels.max(1));
-                let total_frames = cur.pcm.total_frames();
-                if cur.cursor_frame >= total_frames {
-                    cur.sink.drain();
-                    finished = true;
+        if let Some(ref mut cur) = session
+            && !cur.paused
+        {
+            let ch = usize::from(cur.pcm.channels.max(1));
+            let total_frames = cur.pcm.total_frames();
+            if cur.cursor_frame >= total_frames {
+                cur.sink.drain();
+                finished = true;
+            } else {
+                let chunk_frames = 1024usize.min(total_frames - cur.cursor_frame);
+                let start_sample = cur.cursor_frame * ch;
+                let end_sample = start_sample + chunk_frames * ch;
+                let raw_slice = &cur.pcm.samples[start_sample..end_sample];
+
+                let vol = f32::from(volume_pct.load(Ordering::Relaxed)) / 100.0;
+                // Perceptual cubic-ish gain curve so 50% sounds naturally half-loud
+                let gain = (vol * vol * 0.65 + vol * 0.35).clamp(0.0, 1.0);
+
+                let mut s16_buf = Vec::with_capacity(raw_slice.len());
+                let mut sum_sq = 0.0f32;
+                for &sample in raw_slice {
+                    let scaled = (sample * gain).clamp(-1.0, 1.0);
+                    sum_sq += scaled * scaled;
+                    s16_buf.push((scaled * 32767.0) as i16);
+                }
+
+                let rms = if raw_slice.is_empty() {
+                    0.0
                 } else {
-                    let chunk_frames = 1024usize.min(total_frames - cur.cursor_frame);
-                    let start_sample = cur.cursor_frame * ch;
-                    let end_sample = start_sample + chunk_frames * ch;
-                    let raw_slice = &cur.pcm.samples[start_sample..end_sample];
+                    (sum_sq / (raw_slice.len() as f32)).sqrt()
+                };
+                let visual_level = (rms * 3.6).clamp(0.06, 1.0);
+                cur.smoothed_level = cur.smoothed_level * 0.55 + visual_level * 0.45;
 
-                    let vol = f32::from(volume_pct.load(Ordering::Relaxed)) / 100.0;
-                    // Perceptual cubic-ish gain curve so 50% sounds naturally half-loud
-                    let gain = (vol * vol * 0.65 + vol * 0.35).clamp(0.0, 1.0);
-
-                    let mut s16_buf = Vec::with_capacity(raw_slice.len());
-                    let mut sum_sq = 0.0f32;
-                    for &sample in raw_slice {
-                        let scaled = (sample * gain).clamp(-1.0, 1.0);
-                        sum_sq += scaled * scaled;
-                        s16_buf.push((scaled * 32767.0) as i16);
-                    }
-
-                    let rms = if raw_slice.is_empty() {
-                        0.0
-                    } else {
-                        (sum_sq / (raw_slice.len() as f32)).sqrt()
-                    };
-                    let visual_level = (rms * 3.6).clamp(0.06, 1.0);
-                    cur.smoothed_level = cur.smoothed_level * 0.55 + visual_level * 0.45;
-
-                    if let Err(e) = cur.sink.write_s16le(&s16_buf, chunk_frames) {
-                        sink_err = Some(e);
-                    } else {
-                        cur.cursor_frame += chunk_frames;
-                        if cur.last_ui_emit.elapsed() >= Duration::from_millis(65) {
-                            cur.last_ui_emit = Instant::now();
-                            emit_session_update(cur, &on_update);
-                        }
+                if let Err(e) = cur.sink.write_s16le(&s16_buf, chunk_frames) {
+                    sink_err = Some(e);
+                } else {
+                    cur.cursor_frame += chunk_frames;
+                    if cur.last_ui_emit.elapsed() >= Duration::from_millis(65) {
+                        cur.last_ui_emit = Instant::now();
+                        emit_session_update(cur, &on_update);
                     }
                 }
             }
@@ -356,35 +355,33 @@ fn run_audio_worker<F>(
                 error: Some(err),
                 ..PreviewUiUpdate::default()
             });
-        } else if finished {
-            if let Some(cur) = session.take() {
-                // Keep the mini-player bar visible in a clean paused-at-start state so the user
-                // can replay with a single click or dismiss it.
-                let dur = format_mm_ss(cur.pcm.duration_secs());
-                on_update(PreviewUiUpdate {
-                    active: true,
-                    playing: false,
-                    buffering: false,
-                    release_id: cur.req.release_id as i32,
-                    disc_number: cur.req.disc_number,
-                    track_number: cur.req.track_number,
-                    track_title: cur.req.track_title.clone(),
-                    artist_name: cur.req.artist_name.clone(),
-                    release_title: cur.req.release_title.clone(),
-                    progress: 0.0,
-                    elapsed_label: "0:00".to_string(),
-                    duration_label: dur,
-                    level: 0.0,
-                    error: None,
-                });
-                // Re-park at frame 0 paused so clicking Play replays immediately from cache!
-                session = Some(ActiveTrackSession {
-                    cursor_frame: 0,
-                    paused: true,
-                    smoothed_level: 0.0,
-                    ..cur
-                });
-            }
+        } else if finished && let Some(cur) = session.take() {
+            // Keep the mini-player bar visible in a clean paused-at-start state so the user
+            // can replay with a single click or dismiss it.
+            let dur = format_mm_ss(cur.pcm.duration_secs());
+            on_update(PreviewUiUpdate {
+                active: true,
+                playing: false,
+                buffering: false,
+                release_id: cur.req.release_id as i32,
+                disc_number: cur.req.disc_number,
+                track_number: cur.req.track_number,
+                track_title: cur.req.track_title.clone(),
+                artist_name: cur.req.artist_name.clone(),
+                release_title: cur.req.release_title.clone(),
+                progress: 0.0,
+                elapsed_label: "0:00".to_string(),
+                duration_label: dur,
+                level: 0.0,
+                error: None,
+            });
+            // Re-park at frame 0 paused so clicking Play replays immediately from cache!
+            session = Some(ActiveTrackSession {
+                cursor_frame: 0,
+                paused: true,
+                smoothed_level: 0.0,
+                ..cur
+            });
         }
     }
 }
@@ -430,10 +427,10 @@ fn load_and_decode_preview(
     );
 
     let mut target_url = req.preview_url.clone();
-    if is_deezer_preview_url_expired(&target_url) {
-        if let Some(fresh) = refresh_single_track_url(&paths.db_path, engine, req) {
-            target_url = fresh;
-        }
+    if is_deezer_preview_url_expired(&target_url)
+        && let Some(fresh) = refresh_single_track_url(&paths.db_path, engine, req)
+    {
+        target_url = fresh;
     }
 
     let mp3_bytes =
@@ -581,8 +578,7 @@ impl PulseSimpleSink {
                 *lib.get(c"pa_simple_flush").map_err(|e| e.to_string())?;
             let fn_drain: PaSimpleDrainFn =
                 *lib.get(c"pa_simple_drain").map_err(|e| e.to_string())?;
-            let fn_free: PaSimpleFreeFn =
-                *lib.get(c"pa_simple_free").map_err(|e| e.to_string())?;
+            let fn_free: PaSimpleFreeFn = *lib.get(c"pa_simple_free").map_err(|e| e.to_string())?;
 
             let spec = PaSampleSpec {
                 format: PA_SAMPLE_S16LE,
@@ -722,9 +718,8 @@ impl AlsaPcmSink {
                 .map_err(|e| e.to_string())?;
 
             let fn_open: SndPcmOpenFn = *lib.get(c"snd_pcm_open").map_err(|e| e.to_string())?;
-            let fn_set_params: SndPcmSetParamsFn = *lib
-                .get(c"snd_pcm_set_params")
-                .map_err(|e| e.to_string())?;
+            let fn_set_params: SndPcmSetParamsFn =
+                *lib.get(c"snd_pcm_set_params").map_err(|e| e.to_string())?;
             let fn_writei: SndPcmWriteiFn =
                 *lib.get(c"snd_pcm_writei").map_err(|e| e.to_string())?;
             let fn_recover: SndPcmRecoverFn =
@@ -732,10 +727,8 @@ impl AlsaPcmSink {
             let fn_prepare: SndPcmPrepareFn =
                 *lib.get(c"snd_pcm_prepare").map_err(|e| e.to_string())?;
             let fn_drop: SndPcmDropFn = *lib.get(c"snd_pcm_drop").map_err(|e| e.to_string())?;
-            let fn_drain: SndPcmDrainFn =
-                *lib.get(c"snd_pcm_drain").map_err(|e| e.to_string())?;
-            let fn_close: SndPcmCloseFn =
-                *lib.get(c"snd_pcm_close").map_err(|e| e.to_string())?;
+            let fn_drain: SndPcmDrainFn = *lib.get(c"snd_pcm_drain").map_err(|e| e.to_string())?;
+            let fn_close: SndPcmCloseFn = *lib.get(c"snd_pcm_close").map_err(|e| e.to_string())?;
 
             let mut pcm: *mut c_void = std::ptr::null_mut();
             let rc = fn_open(&mut pcm, c"default".as_ptr(), SND_PCM_STREAM_PLAYBACK, 0);

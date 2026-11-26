@@ -9,9 +9,9 @@ use crate::models::{
     AppSettings, Artist, ProgressEvent, ProviderMode, Release, ReleaseTrack, SyncSummary,
 };
 use crate::normalize::{days_ago_iso_utc, normalize_artist_name};
+use crate::providers::ArtistSearchCandidate;
 use crate::providers::deezer::DeezerClient;
 use crate::providers::musicbrainz::MusicBrainzClient;
-use crate::providers::ArtistSearchCandidate;
 
 #[derive(Debug, Clone)]
 pub struct AppPaths {
@@ -174,22 +174,22 @@ impl SyncEngine {
 
         // 1. If we already have a MusicBrainz Artist ID (e.g. from local FLAC tags!) and still
         //    lack a Deezer ID or disambiguation, query MusicBrainz `url-rels` for exact linking!
-        if use_mb && (deezer_id.is_none() || disambiguation.is_none()) {
-            if let Some(ref existing_mbid) = mbid {
-                if let Ok(mb_meta) = self.musicbrainz.lookup_artist_by_mbid(existing_mbid) {
-                    if deezer_id.is_none() && mb_meta.linked_deezer_id.is_some() {
-                        deezer_id = mb_meta.linked_deezer_id;
-                        links_changed = true;
-                    }
-                    if disambiguation.is_none() && mb_meta.disambiguation.is_some() {
-                        disambiguation = mb_meta.disambiguation;
-                        links_changed = true;
-                    }
-                    if external_url.is_none() {
-                        external_url = Some(mb_meta.external_url);
-                        links_changed = true;
-                    }
-                }
+        if use_mb
+            && (deezer_id.is_none() || disambiguation.is_none())
+            && let Some(ref existing_mbid) = mbid
+            && let Ok(mb_meta) = self.musicbrainz.lookup_artist_by_mbid(existing_mbid)
+        {
+            if deezer_id.is_none() && mb_meta.linked_deezer_id.is_some() {
+                deezer_id = mb_meta.linked_deezer_id;
+                links_changed = true;
+            }
+            if disambiguation.is_none() && mb_meta.disambiguation.is_some() {
+                disambiguation = mb_meta.disambiguation;
+                links_changed = true;
+            }
+            if external_url.is_none() {
+                external_url = Some(mb_meta.external_url);
+                links_changed = true;
             }
         }
 
@@ -253,77 +253,71 @@ impl SyncEngine {
         let mut last_err: Option<CoreError> = None;
 
         // 4. Fetch Deezer releases
-        if use_deezer {
-            if let Some(dz_id) = deezer_id {
-                match self.deezer.fetch_artist_releases(
-                    artist.id,
-                    dz_id,
-                    settings.hide_compilations_and_live,
-                ) {
-                    Ok(items) => {
-                        any_provider_succeeded = true;
-                        for rel in items {
-                            if ingest_cutoff.is_some_and(|cutoff| {
-                                !rel.release_date.is_empty() && rel.release_date.as_str() < cutoff
-                            }) {
-                                continue;
-                            }
-                            let (_, inserted, owned) = db.upsert_discovered_release(&rel)?;
-                            if inserted {
-                                stats.new_releases_added += 1;
-                            } else {
-                                stats.releases_updated += 1;
-                            }
-                            if owned {
-                                stats.owned_deduplicated += 1;
-                            }
+        if use_deezer && let Some(dz_id) = deezer_id {
+            match self.deezer.fetch_artist_releases(
+                artist.id,
+                dz_id,
+                settings.hide_compilations_and_live,
+            ) {
+                Ok(items) => {
+                    any_provider_succeeded = true;
+                    for rel in items {
+                        if ingest_cutoff.is_some_and(|cutoff| {
+                            !rel.release_date.is_empty() && rel.release_date.as_str() < cutoff
+                        }) {
+                            continue;
+                        }
+                        let (_, inserted, owned) = db.upsert_discovered_release(&rel)?;
+                        if inserted {
+                            stats.new_releases_added += 1;
+                        } else {
+                            stats.releases_updated += 1;
+                        }
+                        if owned {
+                            stats.owned_deduplicated += 1;
                         }
                     }
-                    Err(e) => {
-                        last_err = Some(e);
-                    }
+                }
+                Err(e) => {
+                    last_err = Some(e);
                 }
             }
         }
 
         // 5. Fetch MusicBrainz release-groups (captures upcoming announced releases & enriches MBIDs!)
-        if use_mb {
-            if let Some(ref artist_mbid) = mbid {
-                match self.musicbrainz.fetch_artist_release_groups(
-                    artist.id,
-                    artist_mbid,
-                    settings.hide_compilations_and_live,
-                ) {
-                    Ok(items) => {
-                        any_provider_succeeded = true;
-                        for rel in items {
-                            if ingest_cutoff.is_some_and(|cutoff| {
-                                !rel.release_date.is_empty() && rel.release_date.as_str() < cutoff
-                            }) {
-                                continue;
-                            }
-                            let (_, inserted, owned) = db.upsert_discovered_release(&rel)?;
-                            if inserted {
-                                stats.new_releases_added += 1;
-                            } else {
-                                stats.releases_updated += 1;
-                            }
-                            if owned {
-                                stats.owned_deduplicated += 1;
-                            }
+        if use_mb && let Some(ref artist_mbid) = mbid {
+            match self.musicbrainz.fetch_artist_release_groups(
+                artist.id,
+                artist_mbid,
+                settings.hide_compilations_and_live,
+            ) {
+                Ok(items) => {
+                    any_provider_succeeded = true;
+                    for rel in items {
+                        if ingest_cutoff.is_some_and(|cutoff| {
+                            !rel.release_date.is_empty() && rel.release_date.as_str() < cutoff
+                        }) {
+                            continue;
+                        }
+                        let (_, inserted, owned) = db.upsert_discovered_release(&rel)?;
+                        if inserted {
+                            stats.new_releases_added += 1;
+                        } else {
+                            stats.releases_updated += 1;
+                        }
+                        if owned {
+                            stats.owned_deduplicated += 1;
                         }
                     }
-                    Err(e) => {
-                        last_err = Some(e);
-                    }
+                }
+                Err(e) => {
+                    last_err = Some(e);
                 }
             }
         }
 
-        if !any_provider_succeeded {
-            if let Some(err) = last_err {
-                return Err(err);
-            }
+        if !any_provider_succeeded && let Some(err) = last_err {
+            return Err(err);
         }
 
         db.mark_artist_checked(artist.id)?;
@@ -419,10 +413,10 @@ impl SyncEngine {
         url: &str,
     ) -> CoreResult<Vec<u8>> {
         let dest = preview_cache_dir.join(format!("{cache_key}.mp3"));
-        if let Ok(bytes) = fs::read(&dest) {
-            if bytes.len() > 1024 {
-                return Ok(bytes);
-            }
+        if let Ok(bytes) = fs::read(&dest)
+            && bytes.len() > 1024
+        {
+            return Ok(bytes);
         }
 
         fs::create_dir_all(preview_cache_dir).map_err(|source| CoreError::Io {
@@ -469,22 +463,20 @@ impl SyncEngine {
         db: &mut Database,
         release: &Release,
     ) -> CoreResult<Vec<ReleaseTrack>> {
-        if let Some(dz_album_id) = release.deezer_album_id {
-            if let Ok(tracks) = self.deezer.fetch_album_tracks(dz_album_id) {
-                if !tracks.is_empty() {
-                    db.replace_release_tracks(release.id, &tracks)?;
-                    return db.list_release_tracks(release.id);
-                }
-            }
+        if let Some(dz_album_id) = release.deezer_album_id
+            && let Ok(tracks) = self.deezer.fetch_album_tracks(dz_album_id)
+            && !tracks.is_empty()
+        {
+            db.replace_release_tracks(release.id, &tracks)?;
+            return db.list_release_tracks(release.id);
         }
 
-        if let Some(ref rg_id) = release.mb_release_group_id {
-            if let Ok(tracks) = self.musicbrainz.fetch_release_group_tracks(rg_id) {
-                if !tracks.is_empty() {
-                    db.replace_release_tracks(release.id, &tracks)?;
-                    return db.list_release_tracks(release.id);
-                }
-            }
+        if let Some(ref rg_id) = release.mb_release_group_id
+            && let Ok(tracks) = self.musicbrainz.fetch_release_group_tracks(rg_id)
+            && !tracks.is_empty()
+        {
+            db.replace_release_tracks(release.id, &tracks)?;
+            return db.list_release_tracks(release.id);
         }
 
         Ok(Vec::new())
@@ -498,28 +490,28 @@ impl SyncEngine {
     ) -> CoreResult<Vec<ArtistSearchCandidate>> {
         let mut results: Vec<ArtistSearchCandidate> = Vec::new();
 
-        if mode != ProviderMode::MusicBrainzOnly {
-            if let Ok(dz) = self.deezer.search_artists(query, 8) {
-                results.extend(dz);
-            }
+        if mode != ProviderMode::MusicBrainzOnly
+            && let Ok(dz) = self.deezer.search_artists(query, 8)
+        {
+            results.extend(dz);
         }
 
-        if mode != ProviderMode::DeezerOnly {
-            if let Ok(mb) = self.musicbrainz.search_artists(query, 6) {
-                for m in mb {
-                    let m_norm = normalize_artist_name(&m.name);
-                    if let Some(existing) = results
-                        .iter_mut()
-                        .find(|r| r.mbid.is_none() && normalize_artist_name(&r.name) == m_norm)
-                    {
-                        existing.mbid = m.mbid;
-                        if m.disambiguation.is_some() {
-                            existing.disambiguation = m.disambiguation;
-                        }
-                        existing.source = "deezer+musicbrainz";
-                    } else {
-                        results.push(m);
+        if mode != ProviderMode::DeezerOnly
+            && let Ok(mb) = self.musicbrainz.search_artists(query, 6)
+        {
+            for m in mb {
+                let m_norm = normalize_artist_name(&m.name);
+                if let Some(existing) = results
+                    .iter_mut()
+                    .find(|r| r.mbid.is_none() && normalize_artist_name(&r.name) == m_norm)
+                {
+                    existing.mbid = m.mbid;
+                    if m.disambiguation.is_some() {
+                        existing.disambiguation = m.disambiguation;
                     }
+                    existing.source = "deezer+musicbrainz";
+                } else {
+                    results.push(m);
                 }
             }
         }

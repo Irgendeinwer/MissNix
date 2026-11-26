@@ -351,25 +351,25 @@ fn resolve_artist_identity(
 
             // 2. Structured `<Artist>/<Album>/track` or `<Artist - Album>/track` folder hierarchy
             //    wins over messy per-track collaboration `ARTIST` tags!
-            if folder_hint.structured_album_hierarchy {
-                if let Some(fa) = clean_folder_artist {
-                    let fa_norm = fold_diacritics_and_symbols(&fa);
-                    let mbid = clean_track_artist
-                        .as_deref()
-                        .filter(|ta| fold_diacritics_and_symbols(ta) == fa_norm)
-                        .and_then(|ta| {
-                            safe_tag_mbid(
-                                meta.track_artist.as_deref(),
-                                ta,
-                                meta.mb_track_artist_id.as_deref(),
-                            )
-                        });
-                    return Some(ResolvedArtist {
-                        artist_name: fa,
-                        mb_artist_id: mbid,
-                        used_tag_artist: false,
+            if folder_hint.structured_album_hierarchy
+                && let Some(fa) = clean_folder_artist
+            {
+                let fa_norm = fold_diacritics_and_symbols(&fa);
+                let mbid = clean_track_artist
+                    .as_deref()
+                    .filter(|ta| fold_diacritics_and_symbols(ta) == fa_norm)
+                    .and_then(|ta| {
+                        safe_tag_mbid(
+                            meta.track_artist.as_deref(),
+                            ta,
+                            meta.mb_track_artist_id.as_deref(),
+                        )
                     });
-                }
+                return Some(ResolvedArtist {
+                    artist_name: fa,
+                    mb_artist_id: mbid,
+                    used_tag_artist: false,
+                });
             }
 
             // 3. Cleaned primary artist from track `ARTIST` tag (for flat/bucket folders)
@@ -638,18 +638,18 @@ fn infer_from_folder_hierarchy(root: &Path, file_path: &Path) -> FolderHint {
     match dirs.as_slice() {
         [] => {
             // Try "Artist - Track.ext" from filename stem if directly inside root
-            if let Some(stem) = file_path.file_stem().and_then(|s| s.to_str()) {
-                if let Some((left, _right)) = stem.split_once(" - ") {
-                    let left = left.trim();
-                    // Ignore numeric track prefixes like "01 - Track"
-                    if !left.is_empty() && !left.chars().all(|c| c.is_ascii_digit()) {
-                        return FolderHint {
-                            artist: Some(left.to_string()),
-                            album: None,
-                            year: None,
-                            structured_album_hierarchy: false,
-                        };
-                    }
+            if let Some(stem) = file_path.file_stem().and_then(|s| s.to_str())
+                && let Some((left, _right)) = stem.split_once(" - ")
+            {
+                let left = left.trim();
+                // Ignore numeric track prefixes like "01 - Track"
+                if !left.is_empty() && !left.chars().all(|c| c.is_ascii_digit()) {
+                    return FolderHint {
+                        artist: Some(left.to_string()),
+                        album: None,
+                        year: None,
+                        structured_album_hierarchy: false,
+                    };
                 }
             }
             FolderHint::default()
@@ -877,20 +877,26 @@ mod tests {
 
         assert!(default_outcome.artists.contains_key("alligatoah"));
         assert!(!default_outcome.artists.contains_key("alligatoah jamal"));
-        assert!(!default_outcome
-            .artists
-            .contains_key("alligatoah dima richman"));
+        assert!(
+            !default_outcome
+                .artists
+                .contains_key("alligatoah dima richman")
+        );
         assert_eq!(default_outcome.artists["alligatoah"].track_count, 2);
 
         assert!(default_outcome.artists.contains_key("alottadogs"));
-        assert!(!default_outcome
-            .artists
-            .contains_key("alottadogs glittermutt"));
+        assert!(
+            !default_outcome
+                .artists
+                .contains_key("alottadogs glittermutt")
+        );
 
         assert!(default_outcome.artists.contains_key("alexander marcus"));
-        assert!(!default_outcome
-            .artists
-            .contains_key("alexander marcus 257ers"));
+        assert!(
+            !default_outcome
+                .artists
+                .contains_key("alexander marcus 257ers")
+        );
 
         assert!(default_outcome.artists.contains_key("tyler the creator"));
         assert_eq!(
@@ -914,9 +920,11 @@ mod tests {
 
         assert_eq!(folder_only_outcome.artists.len(), 2);
         assert!(folder_only_outcome.artists.contains_key("alligatoah"));
-        assert!(folder_only_outcome
-            .artists
-            .contains_key("tyler the creator"));
+        assert!(
+            folder_only_outcome
+                .artists
+                .contains_key("tyler the creator")
+        );
 
         let _ = fs::remove_dir_all(&root);
     }
