@@ -101,6 +101,9 @@
 
           buildInputs =
             runtimeGuiLibs
+            ++ [
+              pkgs.sqlite
+            ]
             ++ lib.optionals stdenv.hostPlatform.isLinux [
               pkgs.libxcb.dev
             ];
