@@ -385,6 +385,27 @@ impl Default for AppSettings {
 }
 
 impl AppSettings {
+    /// Apply optional first-run theme defaults from `MISSNIX_DEFAULT_DARK_MODE`
+    /// (`true`/`false`/`1`/`0`) and `MISSNIX_DEFAULT_ACCENT_HEX` (`#RRGGBB`) before
+    /// persisted SQLite `settings` rows are loaded on top.
+    pub fn apply_env_theme_defaults(
+        &mut self,
+        dark_mode_env: Option<&str>,
+        accent_hex_env: Option<&str>,
+    ) {
+        if let Some(raw) = dark_mode_env.map(str::trim) {
+            if raw.eq_ignore_ascii_case("true") || raw == "1" {
+                self.dark_mode = true;
+            } else if raw.eq_ignore_ascii_case("false") || raw == "0" {
+                self.dark_mode = false;
+            }
+        }
+        if let Some(norm) = accent_hex_env.and_then(crate::palette::normalize_hex_color) {
+            self.accent_preset = crate::palette::CUSTOM_ACCENT_PRESET;
+            self.custom_accent_hex = norm;
+        }
+    }
+
     pub fn lookback_index(&self) -> i32 {
         match self.lookback_days {
             90 => 0,

@@ -73,6 +73,16 @@ impl Database {
             )?;
         }
 
+        // Guard against temporarily missing/unmounted folders (e.g. a background timer
+        // running before a NAS mount or Syncthing share is available) so neither
+        // `local_albums` nor `owned_locally` deduplication flags get wiped out.
+        let has_discovered_content = !outcome.artists.is_empty()
+            || (outcome.summary.folders_scanned > 0 && outcome.summary.audio_files_seen > 0);
+        if !has_discovered_content {
+            tx.commit()?;
+            return Ok(());
+        }
+
         // Reset counts for local artists before re-applying full scan snapshot
         tx.execute(
             "UPDATE artists SET local_album_count = 0, local_track_count = 0 WHERE source = 'local'",

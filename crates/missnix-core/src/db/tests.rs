@@ -349,3 +349,75 @@ fn prunes_stale_polluted_local_artists_on_rescan_and_persists_new_settings() {
     assert_eq!(escape_sql_like("99.9%_test\\x"), "99.9\\%\\_test\\\\x");
     assert!(db.list_artists("%", None, false).unwrap().is_empty());
 }
+
+#[test]
+fn preserves_local_albums_on_unmounted_scan_and_completes_partial_settings_schema() {
+    let dir = std::env::temp_dir().join(format!(
+        "missnix_partial_schema_test_{}_{}",
+        std::process::id(),
+        now_rfc3339_utc().replace([':', '-'], "")
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let db_path = dir.join("missnix.db");
+
+    // Pre-seed only the canonical `settings` table before MissNix ever opens the DB.
+    {
+        let raw = Connection::open(&db_path).unwrap();
+        raw.execute_batch(
+            "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             INSERT INTO settings (key, value) VALUES ('custom_accent_hex', '#E9B143');",
+        )
+        .unwrap();
+    }
+
+    let mut db = Database::open(&db_path).unwrap();
+    assert!(!dir.join("missnix.db.bak").exists());
+    assert_eq!(db.load_settings().unwrap().custom_accent_hex, "#E9B143");
+
+    // Verify env theme defaults apply when unset and normalize `#RRGGBB` to preset 7.
+    let mut env_defaults = AppSettings::default();
+    env_defaults.apply_env_theme_defaults(Some("false"), Some("#e9b143"));
+    assert!(!env_defaults.dark_mode);
+    assert_eq!(
+        env_defaults.accent_preset,
+        crate::palette::CUSTOM_ACCENT_PRESET
+    );
+    assert_eq!(env_defaults.custom_accent_hex, "#E9B143");
+
+    // Seed a local album, then simulate an unmounted/unsynced folder scan (`folders_scanned = 0`).
+    let mut albums = HashMap::new();
+    albums.insert(
+        "geogaddi".to_string(),
+        DiscoveredAlbumRecord {
+            title: "Geogaddi".to_string(),
+            normalized_title: "geogaddi".to_string(),
+            release_year: Some(2002),
+            mb_release_group_id: None,
+            mb_album_id: None,
+            track_count: 23,
+            sample_path: "/music/Boards of Canada/Geogaddi/01.flac".to_string(),
+        },
+    );
+    let mut populated = ScanOutcome::default();
+    populated.summary.folders_scanned = 1;
+    populated.summary.audio_files_seen = 23;
+    populated.artists.insert(
+        "boards of canada".to_string(),
+        DiscoveredArtistRecord {
+            display_name: "Boards of Canada".to_string(),
+            normalized_name: "boards of canada".to_string(),
+            mbid: None,
+            track_count: 23,
+            albums,
+        },
+    );
+    db.apply_scan_outcome(&populated).unwrap();
+    assert_eq!(db.library_stats().unwrap().local_albums, 1);
+
+    let unmounted = ScanOutcome::default();
+    db.apply_scan_outcome(&unmounted).unwrap();
+    assert_eq!(db.library_stats().unwrap().local_albums, 1);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

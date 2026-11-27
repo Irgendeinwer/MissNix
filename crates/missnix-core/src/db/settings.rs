@@ -8,6 +8,10 @@ use super::Database;
 impl Database {
     pub fn load_settings(&self) -> CoreResult<AppSettings> {
         let mut s = AppSettings::default();
+        s.apply_env_theme_defaults(
+            std::env::var("MISSNIX_DEFAULT_DARK_MODE").ok().as_deref(),
+            std::env::var("MISSNIX_DEFAULT_ACCENT_HEX").ok().as_deref(),
+        );
         let mut stmt = self.conn.prepare("SELECT key, value FROM settings")?;
         let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
         for row in rows {

@@ -202,6 +202,38 @@ pub(super) fn is_canonical_schema_valid(conn: &Connection) -> CoreResult<bool> {
     Ok(true)
 }
 
+/// Returns `true` when every existing user table/view already matches one of the
+/// canonical table definitions (for example, a pre-seeded `settings` table created
+/// before first launch), allowing `CANONICAL_DDL` to create the remaining tables
+/// in-place without triggering a legacy `.bak` salvage rebuild.
+pub(super) fn is_partial_canonical_schema_valid(conn: &Connection) -> CoreResult<bool> {
+    let mut stmt = conn.prepare(
+        "SELECT type, name FROM sqlite_master
+         WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'",
+    )?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+    let objects: Vec<(String, String)> = rows.collect::<Result<Vec<_>, _>>()?;
+    if objects.is_empty() {
+        return Ok(false);
+    }
+
+    for (kind, name) in objects {
+        if !kind.eq_ignore_ascii_case("table") {
+            return Ok(false);
+        }
+        let Some(spec) = CANONICAL_SPECS
+            .iter()
+            .find(|s| s.name.eq_ignore_ascii_case(&name))
+        else {
+            return Ok(false);
+        };
+        if !validate_table_spec(conn, spec)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 struct ColInfo {
     name: String,
     not_null: bool,

@@ -16,7 +16,9 @@ use crate::error::{CoreError, CoreResult};
 use crate::models::{LibraryStats, ReleaseType};
 
 use self::salvage::{restore_salvaged_snapshot, salvage_legacy_snapshot};
-use self::schema::{CANONICAL_DDL, SCHEMA_VERSION, is_canonical_schema_valid};
+use self::schema::{
+    CANONICAL_DDL, SCHEMA_VERSION, is_canonical_schema_valid, is_partial_canonical_schema_valid,
+};
 
 #[derive(Debug, Clone)]
 pub struct DiscoveredReleaseInput {
@@ -92,9 +94,12 @@ impl Database {
             return Ok(());
         }
 
-        if is_canonical_schema_valid(&self.conn)? {
+        if is_canonical_schema_valid(&self.conn)? || is_partial_canonical_schema_valid(&self.conn)?
+        {
             self.conn.execute_batch(CANONICAL_DDL)?;
-            self.conn.execute_batch("PRAGMA foreign_keys = ON;")?;
+            self.conn.execute_batch(&format!(
+                "PRAGMA user_version = {SCHEMA_VERSION}; PRAGMA foreign_keys = ON;"
+            ))?;
             return Ok(());
         }
 
