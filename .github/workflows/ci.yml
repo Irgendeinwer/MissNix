@@ -99,6 +99,9 @@ jobs:
           echo "$OUT"
           echo "$OUT" | grep -q "Artists: 1 total (1 tracked"
           echo "$OUT" | grep -q "Local Albums Indexed: 1"
+          JSON_OUT=$("$BIN" --db "$SMOKE_DIR/smoke.db" --json)
+          echo "$JSON_OUT" | grep -q '"tracked_artists": 1'
+          echo "$JSON_OUT" | grep -q '"local_albums": 1'
           rm -rf "$SMOKE_DIR"
 
   nix:
@@ -151,6 +154,8 @@ jobs:
           echo "$OUT"
           echo "$OUT" | grep -q "Artists: 1 total (1 tracked"
           echo "$OUT" | grep -q "Local Albums Indexed: 1"
+          JSON_OUT=$(./result/bin/missnix --db "$SMOKE_DIR/nix-smoke.db" --json)
+          echo "$JSON_OUT" | grep -q '"tracked_artists": 1'
           rm -rf "$SMOKE_DIR"
 
       - name: Run workspace tests inside nix develop

@@ -419,5 +419,15 @@ fn preserves_local_albums_on_unmounted_scan_and_completes_partial_settings_schem
     db.apply_scan_outcome(&unmounted).unwrap();
     assert_eq!(db.library_stats().unwrap().local_albums, 1);
 
+    let report = crate::models::HeadlessReport {
+        db_path: db_path.to_string_lossy().to_string(),
+        status: Some(db.library_stats().unwrap()),
+        ..crate::models::HeadlessReport::default()
+    };
+    let json = report.to_json_pretty().unwrap();
+    assert!(json.contains("\"local_albums\": 1"));
+    assert!(!json.contains("\"scan\":"));
+    assert!(!json.contains("\"check\":"));
+
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -500,6 +500,23 @@ pub struct LibraryStats {
     pub unseen_releases: usize,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct HeadlessReport {
+    pub db_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scan: Option<ScanSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub check: Option<SyncSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<LibraryStats>,
+}
+
+impl HeadlessReport {
+    pub fn to_json_pretty(&self) -> Result<String, String> {
+        serde_json::to_string_pretty(self).map_err(|e| e.to_string())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ProgressEvent {
     ScanStarted {

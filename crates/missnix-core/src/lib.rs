@@ -11,8 +11,8 @@ pub use db::{Database, DiscoveredReleaseInput, DiscoveredTrackInput};
 pub use error::{CoreError, CoreResult};
 pub use models::{
     AppSettings, Artist, ArtistDiscoveryMode, ArtistSource, ArtistStatus, FeedQuery, FeedSort,
-    LibraryFolder, LibraryStats, LocalAlbum, ProgressEvent, ProviderMode, Release, ReleaseState,
-    ReleaseTrack, ReleaseType, ScanSummary, SyncSummary,
+    HeadlessReport, LibraryFolder, LibraryStats, LocalAlbum, ProgressEvent, ProviderMode, Release,
+    ReleaseState, ReleaseTrack, ReleaseType, ScanSummary, SyncSummary,
 };
 pub use palette::{
     CUSTOM_ACCENT_PRESET, DEFAULT_CUSTOM_ACCENT_HEX, MAX_ACCENT_PRESET, ThemePalette,
