@@ -1,15 +1,15 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::db::Database;
+use crate::db::{Database, DiscoveredReleaseInput};
 use crate::error::{CoreError, CoreResult};
 use crate::models::{
     AppSettings, Artist, ProgressEvent, ProviderMode, Release, ReleaseTrack, SyncSummary,
 };
-use crate::normalize::days_ago_iso_utc;
+use crate::normalize::{days_ago_iso_utc, normalize_release_title};
 use crate::providers::ArtistSearchCandidate;
 use crate::providers::deezer::DeezerClient;
 use crate::providers::musicbrainz::MusicBrainzClient;
@@ -326,16 +326,20 @@ impl SyncEngine {
             ) {
                 Ok(items) => {
                     any_provider_succeeded = true;
+                    let title_counts = cross_type_title_counts(&items);
                     for rel in items {
                         if ingest_cutoff.is_some_and(|cutoff| {
                             !rel.release_date.is_empty() && rel.release_date.as_str() < cutoff
                         }) {
                             continue;
                         }
+                        let allow_cross_type =
+                            title_counts.get(&cross_type_title_key(&rel)) == Some(&1);
                         let (_, inserted, owned) = db.upsert_discovered_release_if_ids_match(
                             &rel,
                             mbid.as_deref(),
                             deezer_id,
+                            allow_cross_type,
                         )?;
                         if inserted {
                             stats.new_releases_added += 1;
@@ -362,16 +366,20 @@ impl SyncEngine {
             ) {
                 Ok(items) => {
                     any_provider_succeeded = true;
+                    let title_counts = cross_type_title_counts(&items);
                     for rel in items {
                         if ingest_cutoff.is_some_and(|cutoff| {
                             !rel.release_date.is_empty() && rel.release_date.as_str() < cutoff
                         }) {
                             continue;
                         }
+                        let allow_cross_type =
+                            title_counts.get(&cross_type_title_key(&rel)) == Some(&1);
                         let (_, inserted, owned) = db.upsert_discovered_release_if_ids_match(
                             &rel,
                             mbid.as_deref(),
                             deezer_id,
+                            allow_cross_type,
                         )?;
                         if inserted {
                             stats.new_releases_added += 1;
@@ -569,11 +577,12 @@ impl SyncEngine {
         db: &mut Database,
         release: &Release,
     ) -> CoreResult<Vec<ReleaseTrack>> {
+        let previous = db.list_release_tracks(release.id)?;
         if let Some(dz_album_id) = release.deezer_album_id
             && let Ok(tracks) = self.deezer.fetch_album_tracks(dz_album_id)
             && !tracks.is_empty()
         {
-            db.replace_release_tracks(release.id, &tracks)?;
+            db.replace_release_tracks_if_unchanged(release, &previous, &tracks)?;
             return db.list_release_tracks(release.id);
         }
 
@@ -581,7 +590,7 @@ impl SyncEngine {
             && let Ok(tracks) = self.musicbrainz.fetch_release_group_tracks(rg_id)
             && !tracks.is_empty()
         {
-            db.replace_release_tracks(release.id, &tracks)?;
+            db.replace_release_tracks_if_unchanged(release, &previous, &tracks)?;
             return db.list_release_tracks(release.id);
         }
 
@@ -628,6 +637,25 @@ impl SyncEngine {
         }
         Ok(result)
     }
+}
+
+// If a provider returns multiple different types under the same title/date,
+// never infer a cross-type match based on arrival order.
+fn cross_type_title_key(release: &DiscoveredReleaseInput) -> (String, String) {
+    (
+        normalize_release_title(&release.title),
+        release.release_date.clone(),
+    )
+}
+
+fn cross_type_title_counts(
+    releases: &[DiscoveredReleaseInput],
+) -> HashMap<(String, String), usize> {
+    let mut counts = HashMap::new();
+    for release in releases {
+        *counts.entry(cross_type_title_key(release)).or_insert(0) += 1;
+    }
+    counts
 }
 
 pub fn detect_image_extension(bytes: &[u8]) -> Option<&'static str> {
@@ -839,6 +867,78 @@ mod tests {
         assert_eq!(feed[1].release_type, ReleaseType::Ep);
         assert_eq!(feed[1].track_count, 5);
         assert_eq!(feed[1].provider_source, "deezer+musicbrainz");
+    }
+
+    #[test]
+    fn cross_type_provider_matching_is_disabled_for_ambiguous_batches() {
+        for ambiguous in [false, true] {
+            let mut routes = HashMap::new();
+            routes.insert(
+                "/artist/42/albums?limit=100".to_string(),
+                r#"{"data":[{"id":420,"title":"Nightfall","release_date":"2025-04-18","record_type":"album","nb_tracks":4}]}"#.to_string(),
+            );
+            let second = if ambiguous {
+                r#",{"id":"rg-single","title":"Nightfall","primary-type":"Single","first-release-date":"2025-04-18"}"#
+            } else {
+                ""
+            };
+            routes.insert(
+                "/ws/2/release-group?artist=artist-1&type=album%7Cep%7Csingle&limit=100&offset=0&fmt=json".to_string(),
+                format!(r#"{{"release-group-count":{},"release-groups":[{{"id":"rg-ep","title":"Nightfall","primary-type":"EP","first-release-date":"2025-04-18"}}{}]}}"#, if ambiguous { 2 } else { 1 }, second),
+            );
+            let base = spawn_mock_http_server(routes);
+            let engine = SyncEngine::with_clients(
+                DeezerClient::with_base_url(&base, Duration::from_millis(1)),
+                MusicBrainzClient::with_base_urls(
+                    &format!("{base}/ws/2"),
+                    &base,
+                    Duration::from_millis(1),
+                ),
+                std::env::temp_dir().join("missnix_batch_test_covers"),
+            );
+            let mut db = Database::open_in_memory().unwrap();
+            let artist = db
+                .add_manual_artist("Pair", Some("artist-1"), Some(42), Some("band"), None, None)
+                .unwrap();
+            let settings = AppSettings {
+                lookback_days: 0,
+                ..AppSettings::default()
+            };
+            // Repeat the check to ensure an ambiguous pair is not merged later
+            // merely because both provider rows are now in the database.
+            for _ in 0..2 {
+                let summary = engine
+                    .sync_artists(
+                        &mut db,
+                        std::slice::from_ref(&artist),
+                        &settings,
+                        None,
+                        |_| {},
+                    )
+                    .unwrap();
+                assert_eq!(summary.artists_checked, 1);
+                assert_eq!(summary.artists_failed, 0);
+                let feed = db
+                    .query_releases(&FeedQuery {
+                        include_albums: true,
+                        include_eps: true,
+                        include_singles: true,
+                        ..Default::default()
+                    })
+                    .unwrap();
+                if ambiguous {
+                    assert_eq!(feed.len(), 3);
+                    assert!(feed.iter().all(|release| {
+                        release.deezer_album_id.is_none() != release.mb_release_group_id.is_none()
+                    }));
+                } else {
+                    assert_eq!(feed.len(), 1);
+                    assert_eq!(feed[0].deezer_album_id, Some(420));
+                    assert_eq!(feed[0].mb_release_group_id.as_deref(), Some("rg-ep"));
+                    assert_eq!(feed[0].release_type, ReleaseType::Ep);
+                }
+            }
+        }
     }
 
     #[test]

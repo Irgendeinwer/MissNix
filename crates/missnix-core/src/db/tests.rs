@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use rusqlite::params;
+
 use crate::models::{AppSettings, ArtistDiscoveryMode, ArtistStatus, FeedQuery, ReleaseState};
 use crate::normalize::now_rfc3339_utc;
 use crate::scanner::{DiscoveredAlbumRecord, DiscoveredArtistRecord, ScanOutcome};
@@ -1003,7 +1005,7 @@ fn stale_provider_checks_cannot_overwrite_ids_or_add_wrong_releases() {
     );
     let release = test_release(stale.id, "Wrong Artist's Album", "deezer");
     assert!(
-        db.upsert_discovered_release_if_ids_match(&release, None, Some(1))
+        db.upsert_discovered_release_if_ids_match(&release, None, Some(1), true)
             .is_err()
     );
     assert!(
@@ -1014,4 +1016,399 @@ fn stale_provider_checks_cannot_overwrite_ids_or_add_wrong_releases() {
     assert_eq!(current.deezer_id, Some(2));
     assert_eq!(current.last_checked_at, None);
     assert_eq!(current.discovered_release_count, 0);
+}
+
+fn provider_pair(artist_id: i64) -> (DiscoveredReleaseInput, DiscoveredReleaseInput) {
+    let mut deezer = test_release(artist_id, "Nightfall - EP", "deezer");
+    deezer.release_type = ReleaseType::Album;
+    deezer.release_date = "2025-04-18".into();
+    deezer.deezer_album_id = Some(4123);
+    deezer.cover_url = Some("https://cdn.deezer.com/nightfall.jpg".into());
+    deezer.external_url = Some("https://www.deezer.com/album/4123".into());
+    deezer.track_count = 2;
+    deezer.explicit = true;
+
+    let mut mb = test_release(artist_id, "Nightfall", "musicbrainz");
+    mb.release_type = ReleaseType::Ep;
+    mb.release_date = "2025-04-18".into();
+    mb.mb_release_group_id = Some("nightfall-group".into());
+    mb.cover_url = Some("https://coverartarchive.org/nightfall".into());
+    mb.musicbrainz_url = Some("https://musicbrainz.org/release-group/nightfall-group".into());
+    mb.track_count = 0;
+    (deezer, mb)
+}
+
+fn test_track(number: i32, title: &str, preview: Option<&str>) -> DiscoveredTrackInput {
+    DiscoveredTrackInput {
+        disc_number: 1,
+        track_number: number,
+        title: title.into(),
+        duration_secs: 180 + number,
+        preview_url: preview.map(str::to_string),
+        artist_credit: None,
+    }
+}
+
+#[test]
+fn matching_cross_type_releases_keeps_both_links_in_either_provider_order() {
+    for mb_first in [false, true] {
+        let mut db = Database::open_in_memory().unwrap();
+        let artist = db
+            .add_manual_artist("Example", None, None, None, None, None)
+            .unwrap();
+        let (deezer, mb) = provider_pair(artist.id);
+        let (first, second) = if mb_first {
+            (&mb, &deezer)
+        } else {
+            (&deezer, &mb)
+        };
+        let (id, inserted, _) = db.upsert_discovered_release(first).unwrap();
+        assert!(inserted);
+        db.set_release_state(id, ReleaseState::Seen).unwrap();
+        db.replace_release_tracks(id, &[test_track(1, "Opening", None)])
+            .unwrap();
+
+        let (updated_id, inserted, _) = db.upsert_discovered_release(second).unwrap();
+        assert_eq!(updated_id, id);
+        assert!(!inserted);
+        let release = db.get_release(id).unwrap().unwrap();
+        assert_eq!(release.deezer_album_id, Some(4123));
+        assert_eq!(
+            release.mb_release_group_id.as_deref(),
+            Some("nightfall-group")
+        );
+        assert_eq!(release.release_type, ReleaseType::Ep); // MusicBrainz primary type
+        assert_eq!(release.state, ReleaseState::Seen);
+        assert_eq!(release.provider_source, "deezer+musicbrainz");
+        assert_eq!(release.cover_url, deezer.cover_url);
+        assert_eq!(release.external_url, deezer.external_url);
+        assert_eq!(release.musicbrainz_url, mb.musicbrainz_url);
+        assert_eq!(release.track_count, 2);
+        assert!(release.explicit);
+        assert_eq!(db.list_release_tracks(id).unwrap().len(), 1);
+        assert_eq!(db.library_stats().unwrap().total_releases, 1);
+    }
+}
+
+#[test]
+fn existing_provider_duplicates_merge_transactionally_and_preserve_user_data() {
+    for mb_first in [false, true] {
+        let mut db = Database::open_in_memory().unwrap();
+        let artist = db
+            .add_manual_artist("Example", None, None, None, None, None)
+            .unwrap();
+        db.conn
+            .execute(
+                "INSERT INTO local_albums (artist_id, title, normalized_title, mb_release_group_id)
+             VALUES (?1, 'Different local title', 'different local title', 'nightfall-group')",
+                params![artist.id],
+            )
+            .unwrap();
+        let (deezer, mb) = provider_pair(artist.id);
+        let (first, second) = if mb_first {
+            (&mb, &deezer)
+        } else {
+            (&deezer, &mb)
+        };
+        let (first_id, _, _) = db.upsert_discovered_release(first).unwrap();
+        // Simulate rows left by the old type-sensitive matcher.
+        let (second_id, inserted, _) = db
+            .upsert_discovered_release_if_ids_match(second, None, None, false)
+            .unwrap();
+        assert!(inserted);
+        assert_ne!(first_id, second_id);
+        let dz_id = if mb_first { second_id } else { first_id };
+        let mb_id = if mb_first { first_id } else { second_id };
+        db.set_release_state(mb_id, ReleaseState::Seen).unwrap();
+        db.set_release_state(dz_id, ReleaseState::Dismissed)
+            .unwrap();
+        db.set_release_cover_local_path(dz_id, "/cache/deezer.jpg")
+            .unwrap();
+        db.set_release_cover_local_path(mb_id, "/cache/musicbrainz.jpg")
+            .unwrap();
+        db.replace_release_tracks(mb_id, &[test_track(1, "Opening", None)])
+            .unwrap();
+        let mut dz_track = test_track(1, "Opening", Some("https://deezer.test/preview"));
+        dz_track.artist_credit = Some("Guest".into());
+        db.replace_release_tracks(dz_id, &[dz_track, test_track(2, "Finale", None)])
+            .unwrap();
+        let second_track_id = db.list_release_tracks(dz_id).unwrap()[1].id;
+
+        // A later check of either provider reconciles the existing pair.
+        let (id, inserted, owned) = db.upsert_discovered_release(&deezer).unwrap();
+        assert!(!inserted);
+        assert!(owned);
+        assert_eq!(id, first_id.min(second_id));
+        assert!(db.get_release(first_id.max(second_id)).unwrap().is_none());
+        let release = db.get_release(id).unwrap().unwrap();
+        assert_eq!(release.state, ReleaseState::Dismissed);
+        assert!(release.owned_locally);
+        assert_eq!(release.deezer_album_id, Some(4123));
+        assert_eq!(
+            release.mb_release_group_id.as_deref(),
+            Some("nightfall-group")
+        );
+        assert_eq!(release.release_type, ReleaseType::Ep);
+        assert_eq!(release.provider_source, "deezer+musicbrainz");
+        assert_eq!(release.cover_url, deezer.cover_url);
+        assert_eq!(
+            release.cover_local_path.as_deref(),
+            Some("/cache/deezer.jpg")
+        );
+        assert_eq!(release.external_url, deezer.external_url);
+        assert_eq!(release.musicbrainz_url, mb.musicbrainz_url);
+        let tracks = db.list_release_tracks(id).unwrap();
+        assert_eq!(tracks.len(), 2);
+        assert_eq!(
+            tracks[0].preview_url.as_deref(),
+            Some("https://deezer.test/preview")
+        );
+        assert_eq!(tracks[0].artist_credit.as_deref(), Some("Guest"));
+        assert_eq!(tracks[1].title, "Finale");
+        assert_eq!(tracks[1].id, second_track_id);
+        assert_eq!(db.upsert_discovered_release(&mb).unwrap().0, id);
+        let count: i64 = db
+            .conn
+            .query_row("SELECT COUNT(*) FROM releases", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+}
+
+#[test]
+fn ambiguous_dates_ids_titles_and_tracklists_are_not_merged() {
+    let mut db = Database::open_in_memory().unwrap();
+    let artist = db
+        .add_manual_artist("Example", None, None, None, None, None)
+        .unwrap();
+    let mut group_a = test_release(artist.id, "Echo", "musicbrainz");
+    group_a.mb_release_group_id = Some("group-a".into());
+    let mut group_b = group_a.clone();
+    group_b.mb_release_group_id = Some("group-b".into());
+    let a_id = db.upsert_discovered_release(&group_a).unwrap().0;
+    let b_id = db.upsert_discovered_release(&group_b).unwrap().0;
+    assert_ne!(a_id, b_id);
+    // Same-title/date candidates with different MBIDs are not interchangeable.
+    let mut dz = test_release(artist.id, "Echo", "deezer");
+    dz.deezer_album_id = Some(55);
+    let (dz_id, inserted, _) = db.upsert_discovered_release(&dz).unwrap();
+    assert!(inserted);
+    assert_ne!(dz_id, a_id);
+    assert_ne!(dz_id, b_id);
+    // Exact provider IDs must take precedence over earlier same-title rows.
+    assert_eq!(db.upsert_discovered_release(&group_b).unwrap().0, b_id);
+    assert_eq!(
+        db.get_release(b_id).unwrap().unwrap().mb_release_group_id,
+        group_b.mb_release_group_id
+    );
+
+    let mut other_date = test_release(artist.id, "A Different Date", "musicbrainz");
+    other_date.mb_release_group_id = Some("other-date".into());
+    let old_id = db.upsert_discovered_release(&other_date).unwrap().0;
+    other_date.provider_source = "deezer".into();
+    other_date.mb_release_group_id = None;
+    other_date.deezer_album_id = Some(56);
+    other_date.release_date = "2026-02-01".into();
+    assert_ne!(db.upsert_discovered_release(&other_date).unwrap().0, old_id);
+
+    let plain = test_release(artist.id, "Memento", "deezer");
+    let plain_id = db.upsert_discovered_release(&plain).unwrap().0;
+    let mut misleading = test_release(artist.id, "Memento (Edition of a Dream)", "musicbrainz");
+    misleading.mb_release_group_id = Some("different-work".into());
+    assert_ne!(
+        db.upsert_discovered_release(&misleading).unwrap().0,
+        plain_id
+    );
+
+    let (deezer, mb) = provider_pair(artist.id);
+    let mb_id = db.upsert_discovered_release(&mb).unwrap().0;
+    let dz_id = db
+        .upsert_discovered_release_if_ids_match(&deezer, None, None, false)
+        .unwrap()
+        .0;
+    db.replace_release_tracks(mb_id, &[test_track(1, "Studio version", None)])
+        .unwrap();
+    db.replace_release_tracks(
+        dz_id,
+        &[test_track(1, "Live version", Some("https://preview"))],
+    )
+    .unwrap();
+    assert_eq!(db.upsert_discovered_release(&deezer).unwrap().0, dz_id);
+    assert!(db.get_release(mb_id).unwrap().is_some());
+    assert!(db.get_release(dz_id).unwrap().is_some());
+    assert_eq!(
+        db.list_release_tracks(mb_id).unwrap()[0].title,
+        "Studio version"
+    );
+    assert_eq!(
+        db.list_release_tracks(dz_id).unwrap()[0].title,
+        "Live version"
+    );
+}
+
+#[test]
+fn same_named_tracks_with_conflicting_lengths_or_credits_are_not_merged() {
+    for conflict in ["duration", "credit"] {
+        let mut db = Database::open_in_memory().unwrap();
+        let artist = db
+            .add_manual_artist("Example", None, None, None, None, None)
+            .unwrap();
+        let (deezer, mb) = provider_pair(artist.id);
+        let older = db.upsert_discovered_release(&mb).unwrap().0;
+        let newer = db
+            .upsert_discovered_release_if_ids_match(&deezer, None, None, false)
+            .unwrap()
+            .0;
+        let mut left = test_track(1, "Opening", None);
+        let mut right = test_track(1, "Opening", None);
+        if conflict == "duration" {
+            right.duration_secs += 45;
+        } else {
+            left.artist_credit = Some("The original artist".into());
+            right.artist_credit = Some("A different artist".into());
+        }
+        db.replace_release_tracks(older, &[left]).unwrap();
+        db.replace_release_tracks(newer, &[right]).unwrap();
+        assert_eq!(db.upsert_discovered_release(&deezer).unwrap().0, newer);
+        assert!(db.get_release(older).unwrap().is_some());
+        assert!(db.get_release(newer).unwrap().is_some());
+    }
+}
+
+#[test]
+fn duplicate_is_not_merged_if_it_conflicts_with_incoming_provider_ids() {
+    let mut db = Database::open_in_memory().unwrap();
+    let artist = db
+        .add_manual_artist("Example", None, None, None, None, None)
+        .unwrap();
+    let (mut deezer, mb) = provider_pair(artist.id);
+    let deezer_id = db.upsert_discovered_release(&deezer).unwrap().0;
+    let other_id = db
+        .upsert_discovered_release_if_ids_match(&mb, None, None, false)
+        .unwrap()
+        .0;
+    db.set_release_state(other_id, ReleaseState::Dismissed)
+        .unwrap();
+    db.replace_release_tracks(other_id, &[test_track(1, "Keep this track", None)])
+        .unwrap();
+
+    // The selected Deezer row and the other MB row are complementary, but
+    // the incoming link identifies a different MB release group.
+    deezer.mb_release_group_id = Some("different-group".into());
+    assert_eq!(db.upsert_discovered_release(&deezer).unwrap().0, deezer_id);
+    assert_eq!(
+        db.get_release(deezer_id)
+            .unwrap()
+            .unwrap()
+            .mb_release_group_id
+            .as_deref(),
+        Some("different-group")
+    );
+    assert_eq!(
+        db.get_release(other_id).unwrap().unwrap().state,
+        ReleaseState::Dismissed
+    );
+    assert_eq!(
+        db.list_release_tracks(other_id).unwrap()[0].title,
+        "Keep this track"
+    );
+}
+
+#[test]
+fn stale_track_refresh_cannot_overwrite_a_concurrent_merge_or_refresh() {
+    let mut db = Database::open_in_memory().unwrap();
+    let artist = db
+        .add_manual_artist("Example", None, None, None, None, None)
+        .unwrap();
+    let (deezer, mb) = provider_pair(artist.id);
+    let survivor = db.upsert_discovered_release(&mb).unwrap().0;
+    let donor = db
+        .upsert_discovered_release_if_ids_match(&deezer, None, None, false)
+        .unwrap()
+        .0;
+    let old_identity = db.get_release(survivor).unwrap().unwrap();
+    let before = db.list_release_tracks(survivor).unwrap();
+    db.replace_release_tracks(
+        donor,
+        &[test_track(1, "Merged track", Some("https://preview"))],
+    )
+    .unwrap();
+    assert_eq!(db.upsert_discovered_release(&deezer).unwrap().0, survivor);
+    assert!(db.get_release(donor).unwrap().is_none());
+
+    assert!(
+        !db.replace_release_tracks_if_unchanged(
+            &old_identity,
+            &before,
+            &[test_track(1, "Stale provider response", None)],
+        )
+        .unwrap()
+    );
+    let latest = db.get_release(survivor).unwrap().unwrap();
+    let merged = db.list_release_tracks(survivor).unwrap();
+    assert_eq!(merged[0].title, "Merged track");
+    assert_eq!(merged[0].preview_url.as_deref(), Some("https://preview"));
+
+    // A response based on the current snapshot can still refresh normally.
+    assert!(
+        db.replace_release_tracks_if_unchanged(
+            &latest,
+            &merged,
+            &[test_track(1, "Fresh track", None)],
+        )
+        .unwrap()
+    );
+    // Another in-flight response based on the old snapshot must not win.
+    assert!(
+        !db.replace_release_tracks_if_unchanged(
+            &latest,
+            &merged,
+            &[test_track(1, "Late track", None)],
+        )
+        .unwrap()
+    );
+    assert_eq!(
+        db.list_release_tracks(survivor).unwrap()[0].title,
+        "Fresh track"
+    );
+}
+
+#[test]
+fn failed_duplicate_merge_rolls_back_tracks_and_metadata() {
+    let mut db = Database::open_in_memory().unwrap();
+    let artist = db
+        .add_manual_artist("Example", None, None, None, None, None)
+        .unwrap();
+    let (deezer, mb) = provider_pair(artist.id);
+    let old_id = db.upsert_discovered_release(&mb).unwrap().0;
+    let duplicate_id = db
+        .upsert_discovered_release_if_ids_match(&deezer, None, None, false)
+        .unwrap()
+        .0;
+    db.set_release_state(duplicate_id, ReleaseState::Dismissed)
+        .unwrap();
+    db.replace_release_tracks(
+        duplicate_id,
+        &[test_track(1, "Opening", Some("https://preview"))],
+    )
+    .unwrap();
+    db.conn
+        .execute_batch(&format!(
+            "CREATE TRIGGER reject_duplicate_delete BEFORE DELETE ON releases
+         WHEN OLD.id = {duplicate_id} BEGIN SELECT RAISE(ABORT, 'test rollback'); END;"
+        ))
+        .unwrap();
+    assert!(db.upsert_discovered_release(&deezer).is_err());
+    let old = db.get_release(old_id).unwrap().unwrap();
+    let duplicate = db.get_release(duplicate_id).unwrap().unwrap();
+    assert_eq!(old.deezer_album_id, None);
+    assert_eq!(old.state, ReleaseState::Unseen);
+    assert_eq!(duplicate.state, ReleaseState::Dismissed);
+    assert_eq!(db.list_release_tracks(duplicate_id).unwrap().len(), 1);
+    assert!(db.list_release_tracks(old_id).unwrap().is_empty());
+    let count: i64 = db
+        .conn
+        .query_row("SELECT COUNT(*) FROM releases", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(count, 2);
 }

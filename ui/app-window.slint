@@ -268,7 +268,10 @@ export component AppWindow inherits Window {
             }
 
             VerticalLayout {
+                // Let the center yield space to the full-width inspector even
+                // when the toolbar's preferred width exceeds the window.
                 horizontal-stretch: 1;
+                min-width: 0px;
                 height: 100%;
 
                 Rectangle {

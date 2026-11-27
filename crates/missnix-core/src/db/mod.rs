@@ -1,5 +1,6 @@
 mod artists;
 mod folders;
+mod release_match;
 mod releases;
 mod schema;
 mod settings;

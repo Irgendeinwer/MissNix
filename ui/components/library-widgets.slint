@@ -21,6 +21,7 @@ export component ArtistListRow inherits Rectangle {
     callback toggle-ignore(int);
 
     height: 60px;
+    min-width: 0px;
     vertical-stretch: 0;
     border-radius: 12px;
     background: root.selected
@@ -58,6 +59,7 @@ export component ArtistListRow inherits Rectangle {
         VerticalLayout {
             alignment: center;
             spacing: 3px;
+            min-width: 0px;
             horizontal-stretch: 1;
 
             HorizontalLayout {
@@ -75,28 +77,28 @@ export component ArtistListRow inherits Rectangle {
                     vertical-alignment: center;
                 }
 
-                if root.artist.is-manual : TonalBadge {
+                if root.artist.is-manual && root.width >= 400px : TonalBadge {
                     y: (parent.height - self.height) / 2;
                     label: "MANUAL";
                     badge-bg: Theme.primary-container.with-alpha(0.65);
                     badge-fg: Theme.on-primary-container;
                 }
 
-                if root.artist.status == "muted" : TonalBadge {
+                if root.artist.status == "muted" && root.width >= 400px : TonalBadge {
                     y: (parent.height - self.height) / 2;
                     label: "MUTED";
                     badge-bg: Theme.warning-container;
                     badge-fg: Theme.on-warning-container;
                 }
 
-                if root.artist.status == "missing" : TonalBadge {
+                if root.artist.status == "missing" && root.width >= 400px : TonalBadge {
                     y: (parent.height - self.height) / 2;
                     label: "NOT IN LIBRARY";
                     badge-bg: Theme.surface-container-highest;
                     badge-fg: Theme.on-surface-variant;
                 }
 
-                if root.artist.status == "ignored" : TonalBadge {
+                if root.artist.status == "ignored" && root.width >= 400px : TonalBadge {
                     y: (parent.height - self.height) / 2;
                     label: "IGNORED";
                     badge-bg: Theme.error-container;
@@ -121,7 +123,7 @@ export component ArtistListRow inherits Rectangle {
         }
 
         // Right-aligned compact metadata & non-stretching action cluster
-        if root.artist.unseen-count > 0 : Rectangle {
+        if root.artist.unseen-count > 0 && root.width >= 400px : Rectangle {
             width: drops-txt.preferred-width + 16px;
             height: 24px;
             y: (parent.height - self.height) / 2;
@@ -146,7 +148,7 @@ export component ArtistListRow inherits Rectangle {
             }
         }
 
-        Text {
+        if root.width >= 500px : Text {
             text: root.artist.last-checked;
             width: 86px;
             horizontal-stretch: 0;
@@ -157,8 +159,8 @@ export component ArtistListRow inherits Rectangle {
             overflow: elide;
         }
 
-        // Compact M3 Icon Toggle Buttons (Mute & Ignore — clean & uncrowded!)
-        VerticalLayout {
+        // At very narrow widths these actions remain available in the inspector.
+        if root.width >= 280px : VerticalLayout {
             alignment: center;
             horizontal-stretch: 0;
 

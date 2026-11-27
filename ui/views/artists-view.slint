@@ -1,10 +1,11 @@
-import { ListView } from "std-widgets.slint";
+import { ListView, ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { ArtistRowData, SearchCandidateRowData } from "../models.slint";
 import {
     ArtistListRow,
     M3Button,
     M3FilterChip,
+    M3HorizontalScrollBar,
     M3ScrollBar,
     M3SearchField,
     M3Spinner,
@@ -42,6 +43,8 @@ export component ArtistsView inherits HorizontalLayout {
 
     VerticalLayout {
         max-width: 1040px;
+        preferred-width: 1040px;
+        min-width: 0px;
         horizontal-stretch: 1;
         height: 100%;
         padding-left: 20px;
@@ -50,11 +53,17 @@ export component ArtistsView inherits HorizontalLayout {
         padding-bottom: 14px;
         spacing: 12px;
 
-        HorizontalLayout {
-            spacing: 12px;
+        // Keep the add action reachable when the inspector narrows this view.
+        heading := Rectangle {
+            property <bool> narrow: self.width < 760px;
+            height: self.narrow ? 84px : 40px;
             vertical-stretch: 0;
 
             VerticalLayout {
+                x: 0px;
+                y: 0px;
+                width: heading.narrow ? heading.width : max(0px, heading.width - 138px);
+                height: 40px;
                 alignment: center;
                 spacing: 2px;
                 Text {
@@ -62,27 +71,26 @@ export component ArtistsView inherits HorizontalLayout {
                     font-size: 21px;
                     font-weight: 800;
                     color: Theme.on-surface;
+                    overflow: elide;
                 }
                 Text {
                     text: "Primary artists discovered from your library — click any artist to inspect, mute, hide, or override IDs";
                     font-size: 12px;
                     color: Theme.on-surface-variant;
+                    overflow: elide;
                 }
             }
-
-            Rectangle { horizontal-stretch: 1; }
-
             M3Button {
-                y: (parent.height - self.height) / 2;
+                x: heading.narrow ? 0px : max(0px, heading.width - self.width);
+                y: heading.narrow ? 46px : 2px;
+                width: min(130px, heading.width);
                 variant: root.show-add-artist-bar ? "outlined" : "filled";
                 has-icon: true;
                 icon: root.show-add-artist-bar
                     ? @image-url("../../assets/icons/close.svg")
                     : @image-url("../../assets/icons/plus.svg");
                 text: root.show-add-artist-bar ? "Close" : "Add Artist";
-                clicked => {
-                    root.show-add-artist-bar = !root.show-add-artist-bar;
-                }
+                clicked => { root.show-add-artist-bar = !root.show-add-artist-bar; }
             }
         }
 
@@ -99,26 +107,35 @@ export component ArtistsView inherits HorizontalLayout {
                 spacing: 10px;
                 alignment: start;
 
-                HorizontalLayout {
-                    spacing: 10px;
+                artist-add-controls := Rectangle {
+                    property <bool> narrow: self.width < 500px;
+                    property <bool> stacked: self.width < 274px;
+                    height: self.stacked ? 126px : self.narrow ? 86px : 38px;
+                    vertical-stretch: 0;
 
                     M3SearchField {
-                        horizontal-stretch: 1;
+                        x: 0px;
+                        y: 0px;
+                        width: artist-add-controls.narrow ? artist-add-controls.width
+                            : max(0px, artist-add-controls.width - 284px);
+                        height: 38px;
                         text <=> root.manual-artist-query;
                         placeholder: "Search Deezer & MusicBrainz for an artist to track...";
                         accepted(val) => { root.search-external-artist(val); }
                     }
-
-                    M3Button {
-                        y: (parent.height - self.height) / 2;
+                    search-online := M3Button {
+                        x: artist-add-controls.narrow ? 0px : artist-add-controls.width - 274px;
+                        y: artist-add-controls.narrow ? 48px : 1px;
+                        width: min(132px, artist-add-controls.width);
                         variant: "filled";
                         text: "Search Online";
                         enabled: root.manual-artist-query != "" && !root.searching-external-artists;
                         clicked => { root.search-external-artist(root.manual-artist-query); }
                     }
-
                     M3Button {
-                        y: (parent.height - self.height) / 2;
+                        x: artist-add-controls.stacked ? 0px : search-online.x + search-online.width + 10px;
+                        y: artist-add-controls.stacked ? 88px : search-online.y;
+                        width: min(132px, artist-add-controls.width);
                         variant: "tonal";
                         text: "Add by Name";
                         enabled: root.manual-artist-query != "";
@@ -148,72 +165,75 @@ export component ArtistsView inherits HorizontalLayout {
             }
         }
 
-        // Artist Search & Material 3 Filter Chips
-        HorizontalLayout {
-            spacing: 10px;
+        // Stack search and filters as needed; the chips remain scrollable at
+        // very narrow widths rather than being clipped behind the drawer.
+        artist-filter-bar := Rectangle {
+            property <bool> narrow: self.width < artist-chip-row.preferred-width + 200px;
+            height: self.narrow ? 84px : 44px;
             vertical-stretch: 0;
 
             artist-search-input := M3SearchField {
-                min-width: 190px;
-                max-width: 340px;
-                horizontal-stretch: 1;
+                x: 0px;
+                y: 0px;
+                width: artist-filter-bar.narrow ? artist-filter-bar.width
+                    : min(340px, max(190px, artist-filter-bar.width - artist-chip-row.preferred-width - 10px));
+                height: 38px;
                 text <=> root.artist-search-text;
                 placeholder: "Filter artists by name...  (/)";
                 edited => { root.artist-filters-changed(); }
             }
+            artist-chip-scroll := ScrollView {
+                x: artist-filter-bar.narrow ? 0px : artist-search-input.width + 10px;
+                y: artist-filter-bar.narrow ? 42px : 3px;
+                width: max(0px, artist-filter-bar.width - self.x);
+                height: 44px;
+                vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+                horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+                content-width: max(self.visible-width, artist-chip-row.preferred-width);
+                content-height: 32px;
 
-            VerticalLayout {
-                alignment: center;
-                horizontal-stretch: 0;
-
-                HorizontalLayout {
+                artist-chip-row := HorizontalLayout {
+                    x: 0px;
+                    y: 0px;
                     spacing: 6px;
+                    width: self.preferred-width;
                     height: 32px;
-
                     M3FilterChip {
                         label: "All";
                         selected: root.artist-filter-index == 0;
-                        clicked => {
-                            root.artist-filter-index = 0;
-                            root.artist-filters-changed();
-                        }
+                        clicked => { root.artist-filter-index = 0; root.artist-filters-changed(); }
                     }
                     M3FilterChip {
                         label: "Tracked";
                         selected: root.artist-filter-index == 1;
-                        clicked => {
-                            root.artist-filter-index = 1;
-                            root.artist-filters-changed();
-                        }
+                        clicked => { root.artist-filter-index = 1; root.artist-filters-changed(); }
                     }
                     M3FilterChip {
                         label: "Muted";
                         selected: root.artist-filter-index == 2;
-                        clicked => {
-                            root.artist-filter-index = 2;
-                            root.artist-filters-changed();
-                        }
+                        clicked => { root.artist-filter-index = 2; root.artist-filters-changed(); }
                     }
                     M3FilterChip {
                         label: "Ignored";
                         selected: root.artist-filter-index == 3;
-                        clicked => {
-                            root.artist-filter-index = 3;
-                            root.artist-filters-changed();
-                        }
+                        clicked => { root.artist-filter-index = 3; root.artist-filters-changed(); }
                     }
                     M3FilterChip {
                         label: "Manual";
                         selected: root.artist-filter-index == 4;
-                        clicked => {
-                            root.artist-filter-index = 4;
-                            root.artist-filters-changed();
-                        }
+                        clicked => { root.artist-filter-index = 4; root.artist-filters-changed(); }
                     }
                 }
             }
-
-            Rectangle { horizontal-stretch: 1; }
+            M3HorizontalScrollBar {
+                x: artist-chip-scroll.x;
+                y: artist-chip-scroll.y + 34px;
+                width: artist-chip-scroll.visible-width;
+                page-size: artist-chip-scroll.visible-width;
+                maximum: max(0px, artist-chip-scroll.content-width - artist-chip-scroll.visible-width);
+                value: -artist-chip-scroll.content-x;
+                scrolled(val) => { artist-chip-scroll.content-x = -val; }
+            }
         }
 
         if root.artists.length == 0 : Rectangle {
@@ -236,6 +256,7 @@ export component ArtistsView inherits HorizontalLayout {
                 height: 100%;
                 vertical-scrollbar-policy: ScrollBarPolicy.always-off;
                 horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+                content-width: self.visible-width;
 
                 for art in root.artists : VerticalLayout {
                     padding-bottom: 6px;

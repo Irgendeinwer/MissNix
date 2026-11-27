@@ -490,3 +490,61 @@ export component M3ScrollBar inherits Rectangle {
         }
     }
 }
+
+// Themed horizontal scrollbar for compact toolbars and filter rows that
+// cannot fit alongside the inspector at narrow window sizes.
+export component M3HorizontalScrollBar inherits Rectangle {
+    in property <length> page-size;
+    in property <length> maximum;
+    in property <length> value;
+    callback scrolled(length);
+
+    height: 10px;
+    visible: root.maximum > 1px;
+    background: transparent;
+    property <length> track-width: max(0px, root.width - 4px);
+    property <float> page-ratio: Math.clamp(root.page-size / max(1px, root.page-size + root.maximum), 0.0, 1.0);
+    property <length> thumb-width: min(root.track-width, max(24px, root.track-width * root.page-ratio));
+    property <length> travel: max(1px, root.track-width - root.thumb-width);
+    property <length> thumb-x: 2px + root.travel * Math.clamp(root.value / max(1px, root.maximum), 0.0, 1.0);
+
+    Rectangle {
+        x: root.thumb-x;
+        y: 2px;
+        width: root.thumb-width;
+        height: 5px;
+        border-radius: 2.5px;
+        background: bar-touch.pressed ? Theme.primary
+                  : bar-touch.has-hover ? Theme.on-surface-variant
+                  : Theme.on-surface-muted.with-alpha(0.75);
+    }
+    bar-touch := TouchArea {
+        property <length> start-x: 0px;
+        property <length> start-value: 0px;
+        property <length> start-maximum: 0px;
+        property <bool> grabbed-thumb: false;
+        mouse-cursor: pointer;
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+                self.start-x = self.mouse-x;
+                self.start-maximum = root.maximum;
+                self.grabbed-thumb = self.mouse-x >= root.thumb-x && self.mouse-x <= root.thumb-x + root.thumb-width;
+                self.start-value = self.grabbed-thumb ? root.value
+                    : Math.clamp(root.maximum * ((self.mouse-x - 2px - root.thumb-width / 2) / root.travel), 0px, root.maximum);
+                if (!self.grabbed-thumb) { root.scrolled(self.start-value); }
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                if (self.start-maximum != root.maximum) {
+                    self.start-maximum = root.maximum;
+                    self.start-value = root.value;
+                    self.start-x = self.mouse-x;
+                }
+                root.scrolled(self.grabbed-thumb
+                    ? Math.clamp(self.start-value + root.maximum * ((self.mouse-x - self.start-x) / root.travel), 0px, root.maximum)
+                    : Math.clamp(root.maximum * ((self.mouse-x - 2px - root.thumb-width / 2) / root.travel), 0px, root.maximum));
+            }
+        }
+    }
+}

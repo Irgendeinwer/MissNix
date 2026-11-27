@@ -5,10 +5,13 @@ use rusqlite::{
 
 use crate::error::{CoreError, CoreResult};
 use crate::models::{FeedQuery, FeedSort, Release, ReleaseState, ReleaseTrack, ReleaseType};
-use crate::normalize::{normalize_release_title, now_rfc3339_utc, today_iso_utc};
+use crate::normalize::{
+    fold_diacritics_and_symbols, normalize_release_title, now_rfc3339_utc, today_iso_utc,
+};
 
 use super::{
     Database, DiscoveredReleaseInput, DiscoveredTrackInput, escape_sql_like, merge_provider_labels,
+    release_match::{ReleaseIdentity, choose_release_match},
 };
 
 impl Database {
@@ -19,7 +22,7 @@ impl Database {
         &self,
         input: &DiscoveredReleaseInput,
     ) -> CoreResult<(i64, bool, bool)> {
-        self.upsert_discovered_release_inner(input, None)
+        self.upsert_discovered_release_inner(input, None, true)
     }
 
     pub(crate) fn upsert_discovered_release_if_ids_match(
@@ -27,14 +30,16 @@ impl Database {
         input: &DiscoveredReleaseInput,
         mbid: Option<&str>,
         deezer_id: Option<i64>,
+        allow_cross_type: bool,
     ) -> CoreResult<(i64, bool, bool)> {
-        self.upsert_discovered_release_inner(input, Some((mbid, deezer_id)))
+        self.upsert_discovered_release_inner(input, Some((mbid, deezer_id)), allow_cross_type)
     }
 
     fn upsert_discovered_release_inner(
         &self,
         input: &DiscoveredReleaseInput,
         expected_ids: Option<(Option<&str>, Option<i64>)>,
+        allow_cross_type: bool,
     ) -> CoreResult<(i64, bool, bool)> {
         let norm_title = normalize_release_title(&input.title);
         if norm_title.is_empty() {
@@ -58,41 +63,98 @@ impl Database {
             }
         }
 
-        // Match existing release by Deezer ID, MusicBrainz Release-Group ID, or (normalized_title, release_type)
-        let existing: Option<(i64, String, String, Option<String>)> = tx
-            .query_row(
-                "SELECT id, provider_source, normalized_title, mb_release_group_id FROM releases
-                 WHERE artist_id = ?1
-                   AND (
-                       (?2 IS NOT NULL AND deezer_album_id = ?2)
-                       OR (?3 IS NOT NULL AND mb_release_group_id = ?3)
-                       OR (normalized_title = ?4 AND release_type = ?5)
-                   )
-                 ORDER BY id ASC LIMIT 1",
+        let incoming = ReleaseIdentity {
+            id: 0,
+            title: input.title.clone(),
+            normalized_title: norm_title.clone(),
+            release_type: input.release_type.as_str().to_string(),
+            release_date: input.release_date.clone(),
+            deezer_album_id: input.deezer_album_id,
+            mb_release_group_id: input.mb_release_group_id.clone(),
+        };
+        // Include competing same-title rows and rows connected to an exact ID.
+        // Do not pick an arbitrary first title match when several are plausible.
+        let candidates = {
+            let mut stmt = tx.prepare(
+                "WITH direct AS (
+                    SELECT id, normalized_title, deezer_album_id, mb_release_group_id
+                    FROM releases WHERE artist_id = ?1 AND
+                        ((?3 IS NOT NULL AND deezer_album_id = ?3)
+                         OR (?4 IS NOT NULL AND mb_release_group_id = ?4))
+                 )
+                 SELECT id, title, normalized_title, release_type, release_date,
+                        deezer_album_id, mb_release_group_id
+                 FROM releases WHERE artist_id = ?1 AND (
+                    normalized_title = ?2 OR normalized_title IN (SELECT normalized_title FROM direct)
+                    OR id IN (SELECT id FROM direct)
+                    OR deezer_album_id IN (SELECT deezer_album_id FROM direct)
+                    OR mb_release_group_id IN (SELECT mb_release_group_id FROM direct)
+                 ) ORDER BY id",
+            )?;
+            let rows = stmt.query_map(
                 params![
                     input.artist_id,
-                    input.deezer_album_id,
-                    input.mb_release_group_id,
                     norm_title,
-                    input.release_type.as_str()
+                    input.deezer_album_id,
+                    input.mb_release_group_id
                 ],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-            )
-            .optional()?;
+                |row| {
+                    Ok(ReleaseIdentity {
+                        id: row.get(0)?,
+                        title: row.get(1)?,
+                        normalized_title: row.get(2)?,
+                        release_type: row.get(3)?,
+                        release_date: row.get(4)?,
+                        deezer_album_id: row.get(5)?,
+                        mb_release_group_id: row.get(6)?,
+                    })
+                },
+            )?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        let (selected, duplicate) = choose_release_match(&incoming, &candidates, allow_cross_type);
+        if selected.is_some_and(|index| candidates[index].conflicts_with(&incoming)) {
+            return Err(CoreError::Validation(
+                "Conflicting provider IDs for an existing release; no release was changed."
+                    .to_string(),
+            ));
+        }
+        let selected_id = if let Some(index) = selected {
+            let id = candidates[index].id;
+            if let Some(other) =
+                duplicate.filter(|&other| !candidates[other].conflicts_with(&incoming))
+            {
+                consolidate_release_pair(&tx, id, candidates[other].id)?.unwrap_or(id)
+            } else {
+                id
+            }
+        } else {
+            0
+        };
+        let existing: Option<(i64, String, String, Option<String>)> = if selected_id > 0 {
+            Some(tx.query_row(
+                "SELECT id, provider_source, normalized_title, mb_release_group_id
+                 FROM releases WHERE id = ?1",
+                params![selected_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )?)
+        } else {
+            None
+        };
 
-        // Use the persisted release identity as well as the incoming provider's
-        // identity. Deezer updates normally omit a previously known MB group ID.
-        let owned_locally = release_owned_locally(
-            &tx,
-            input.artist_id,
-            existing
-                .as_ref()
-                .map_or(norm_title.as_str(), |row| row.2.as_str()),
-            input
-                .mb_release_group_id
-                .as_deref()
-                .or_else(|| existing.as_ref().and_then(|row| row.3.as_deref())),
-        )?;
+        // Consider both the incoming and retained identity. If only the incoming
+        // spelling matches a local album, retain it so later scans keep ownership.
+        let mb_group = input
+            .mb_release_group_id
+            .as_deref()
+            .or_else(|| existing.as_ref().and_then(|row| row.3.as_deref()));
+        let existing_owned = match existing.as_ref() {
+            Some(row) => release_owned_locally(&tx, input.artist_id, &row.2, mb_group)?,
+            None => false,
+        };
+        let incoming_owned = release_owned_locally(&tx, input.artist_id, &norm_title, mb_group)?;
+        let owned_locally = existing_owned || incoming_owned;
+        let promote_incoming_title = existing.is_some() && !existing_owned && incoming_owned;
         let now = now_rfc3339_utc();
 
         let (release_id, inserted) = if let Some((existing_id, existing_provider, _, _)) = existing
@@ -104,8 +166,8 @@ impl Database {
                         WHEN (release_date = '' OR LENGTH(?1) > LENGTH(release_date)) AND ?1 != '' THEN ?1
                         ELSE release_date
                     END,
-                    deezer_album_id = COALESCE(?2, deezer_album_id),
-                    mb_release_group_id = COALESCE(?3, mb_release_group_id),
+                    deezer_album_id = COALESCE(deezer_album_id, ?2),
+                    mb_release_group_id = COALESCE(mb_release_group_id, ?3),
                     cover_local_path = CASE
                         WHEN ?13 = 'deezer' AND ?4 IS NOT NULL AND COALESCE(cover_url, '') != ?4
                         THEN NULL ELSE cover_local_path END,
@@ -117,7 +179,10 @@ impl Database {
                     explicit = MAX(explicit, ?8),
                     owned_locally = ?9,
                     provider_source = ?10,
-                    updated_at = ?11
+                    updated_at = ?11,
+                    release_type = CASE WHEN ?13 = 'musicbrainz' THEN ?14 ELSE release_type END,
+                    title = CASE WHEN ?15 THEN ?16 ELSE title END,
+                    normalized_title = CASE WHEN ?15 THEN ?17 ELSE normalized_title END
                  WHERE id = ?12",
                 params![
                     input.release_date,
@@ -132,7 +197,11 @@ impl Database {
                     merged_provider,
                     now,
                     existing_id,
-                    input.provider_source
+                    input.provider_source,
+                    input.release_type.as_str(),
+                    promote_incoming_title,
+                    input.title,
+                    norm_title
                 ],
             )?;
             (existing_id, false)
@@ -378,58 +447,375 @@ impl Database {
         tracks: &[DiscoveredTrackInput],
     ) -> CoreResult<()> {
         let tx = self.conn.transaction()?;
-        tx.execute(
-            "DELETE FROM release_tracks WHERE release_id = ?1",
-            params![release_id],
-        )?;
-        for t in tracks {
-            tx.execute(
-                "INSERT OR REPLACE INTO release_tracks (
-                    release_id, disc_number, track_number, title,
-                    duration_secs, preview_url, artist_credit
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![
-                    release_id,
-                    t.disc_number.max(1),
-                    t.track_number,
-                    t.title,
-                    t.duration_secs.max(0),
-                    t.preview_url,
-                    t.artist_credit
-                ],
-            )?;
-        }
-        if !tracks.is_empty() {
-            tx.execute(
-                "UPDATE releases SET track_count = MAX(track_count, ?1) WHERE id = ?2",
-                params![tracks.len() as i32, release_id],
-            )?;
-        }
+        replace_tracks_in_transaction(&tx, release_id, tracks)?;
         tx.commit()?;
         Ok(())
     }
 
-    pub fn list_release_tracks(&self, release_id: i64) -> CoreResult<Vec<ReleaseTrack>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, release_id, disc_number, track_number, title, duration_secs, preview_url, artist_credit
-             FROM release_tracks
-             WHERE release_id = ?1
-             ORDER BY disc_number ASC, track_number ASC",
+    /// Do not let an in-flight provider response overwrite tracks transferred
+    /// by a concurrent duplicate merge (or by another track refresh).
+    pub(crate) fn replace_release_tracks_if_unchanged(
+        &mut self,
+        release: &Release,
+        previous: &[ReleaseTrack],
+        tracks: &[DiscoveredTrackInput],
+    ) -> CoreResult<bool> {
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let same_identity: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM releases WHERE id = ?1 AND artist_id = ?2
+                 AND deezer_album_id IS ?3 AND mb_release_group_id IS ?4)",
+            params![
+                release.id,
+                release.artist_id,
+                release.deezer_album_id,
+                release.mb_release_group_id
+            ],
+            |row| row.get(0),
         )?;
-        let rows = stmt.query_map(params![release_id], |r| {
-            Ok(ReleaseTrack {
-                id: r.get(0)?,
-                release_id: r.get(1)?,
-                disc_number: r.get(2)?,
-                track_number: r.get(3)?,
-                title: r.get(4)?,
-                duration_secs: r.get(5)?,
-                preview_url: r.get(6)?,
-                artist_credit: r.get(7)?,
-            })
-        })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(CoreError::from)
+        if !same_identity || load_release_tracks(&tx, release.id)? != previous {
+            return Ok(false);
+        }
+        replace_tracks_in_transaction(&tx, release.id, tracks)?;
+        tx.commit()?;
+        Ok(true)
     }
+
+    pub fn list_release_tracks(&self, release_id: i64) -> CoreResult<Vec<ReleaseTrack>> {
+        load_release_tracks(&self.conn, release_id)
+    }
+}
+
+fn replace_tracks_in_transaction(
+    tx: &Transaction<'_>,
+    release_id: i64,
+    tracks: &[DiscoveredTrackInput],
+) -> CoreResult<()> {
+    tx.execute(
+        "DELETE FROM release_tracks WHERE release_id = ?1",
+        params![release_id],
+    )?;
+    for track in tracks {
+        tx.execute(
+            "INSERT OR REPLACE INTO release_tracks (
+                release_id, disc_number, track_number, title,
+                duration_secs, preview_url, artist_credit
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                release_id,
+                track.disc_number.max(1),
+                track.track_number,
+                track.title,
+                track.duration_secs.max(0),
+                track.preview_url,
+                track.artist_credit
+            ],
+        )?;
+    }
+    if !tracks.is_empty() {
+        tx.execute(
+            "UPDATE releases SET track_count = MAX(track_count, ?1) WHERE id = ?2",
+            params![tracks.len() as i32, release_id],
+        )?;
+    }
+    Ok(())
+}
+
+fn load_release_tracks(conn: &Connection, release_id: i64) -> CoreResult<Vec<ReleaseTrack>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, release_id, disc_number, track_number, title, duration_secs, preview_url, artist_credit
+         FROM release_tracks WHERE release_id = ?1
+         ORDER BY disc_number ASC, track_number ASC",
+    )?;
+    let rows = stmt.query_map(params![release_id], |row| {
+        Ok(ReleaseTrack {
+            id: row.get(0)?,
+            release_id: row.get(1)?,
+            disc_number: row.get(2)?,
+            track_number: row.get(3)?,
+            title: row.get(4)?,
+            duration_secs: row.get(5)?,
+            preview_url: row.get(6)?,
+            artist_credit: row.get(7)?,
+        })
+    })?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(CoreError::from)
+}
+
+#[derive(Debug)]
+struct StoredRelease {
+    identity: ReleaseIdentity,
+    artist_id: i64,
+    cover_url: Option<String>,
+    cover_local_path: Option<String>,
+    external_url: Option<String>,
+    musicbrainz_url: Option<String>,
+    track_count: i32,
+    explicit: bool,
+    state: String,
+    provider_source: String,
+    discovered_at: String,
+}
+
+fn stored_release(conn: &Connection, id: i64) -> CoreResult<StoredRelease> {
+    conn.query_row(
+        "SELECT id, artist_id, title, normalized_title, release_type, release_date,
+                deezer_album_id, mb_release_group_id, cover_url, cover_local_path,
+                external_url, musicbrainz_url, track_count, explicit, state,
+                provider_source, discovered_at FROM releases WHERE id = ?1",
+        params![id],
+        |row| {
+            Ok(StoredRelease {
+                identity: ReleaseIdentity {
+                    id: row.get(0)?,
+                    title: row.get(2)?,
+                    normalized_title: row.get(3)?,
+                    release_type: row.get(4)?,
+                    release_date: row.get(5)?,
+                    deezer_album_id: row.get(6)?,
+                    mb_release_group_id: row.get(7)?,
+                },
+                artist_id: row.get(1)?,
+                cover_url: row.get(8)?,
+                cover_local_path: row.get(9)?,
+                external_url: row.get(10)?,
+                musicbrainz_url: row.get(11)?,
+                track_count: row.get(12)?,
+                explicit: row.get::<_, i32>(13)? != 0,
+                state: row.get(14)?,
+                provider_source: row.get(15)?,
+                discovered_at: row.get(16)?,
+            })
+        },
+    )
+    .map_err(CoreError::from)
+}
+
+fn state_priority(state: &str) -> Option<u8> {
+    match state {
+        "unseen" => Some(0),
+        "seen" => Some(1),
+        "dismissed" => Some(2),
+        _ => None,
+    }
+}
+
+/// Consolidate an already-matched pair atomically. The older row ID survives;
+/// conflicting track titles or unknown states leave both rows untouched.
+fn consolidate_release_pair(
+    tx: &Transaction<'_>,
+    first_id: i64,
+    second_id: i64,
+) -> CoreResult<Option<i64>> {
+    let survivor_id = first_id.min(second_id);
+    let donor_id = first_id.max(second_id);
+    let survivor = stored_release(tx, survivor_id)?;
+    let donor = stored_release(tx, donor_id)?;
+    if survivor.artist_id != donor.artist_id || survivor.identity.conflicts_with(&donor.identity) {
+        return Ok(None);
+    }
+    let (Some(survivor_state), Some(donor_state)) = (
+        state_priority(&survivor.state),
+        state_priority(&donor.state),
+    ) else {
+        return Ok(None);
+    };
+
+    // Mismatching titles, artist credits or substantially different lengths at
+    // the same position can mean different recordings or editions. In that
+    // case there is no safe union, even if the release titles happen to match.
+    let tracks_compatible = {
+        let mut stmt = tx.prepare(
+            "SELECT a.title, b.title, a.duration_secs, b.duration_secs,
+                    a.artist_credit, b.artist_credit
+             FROM release_tracks a JOIN release_tracks b
+             ON a.disc_number = b.disc_number AND a.track_number = b.track_number
+             WHERE a.release_id = ?1 AND b.release_id = ?2",
+        )?;
+        let pairs = stmt.query_map(params![survivor_id, donor_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i32>(2)?,
+                row.get::<_, i32>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+            ))
+        })?;
+        let mut compatible = true;
+        for pair in pairs {
+            let (left, right, left_duration, right_duration, left_credit, right_credit) = pair?;
+            let title_conflict = !left.trim().is_empty()
+                && !right.trim().is_empty()
+                && fold_diacritics_and_symbols(&left) != fold_diacritics_and_symbols(&right);
+            let duration_conflict = left_duration > 0
+                && right_duration > 0
+                && left_duration.abs_diff(right_duration) > 10;
+            let credit_conflict = matches!(
+                (left_credit.as_deref(), right_credit.as_deref()),
+                (Some(a), Some(b)) if !a.trim().is_empty() && !b.trim().is_empty()
+                    && fold_diacritics_and_symbols(a) != fold_diacritics_and_symbols(b)
+            );
+            if title_conflict || duration_conflict || credit_conflict {
+                compatible = false;
+                break;
+            }
+        }
+        compatible
+    };
+    if !tracks_compatible {
+        return Ok(None);
+    }
+
+    let mb_group = survivor
+        .identity
+        .mb_release_group_id
+        .as_deref()
+        .or(donor.identity.mb_release_group_id.as_deref());
+    let survivor_owned = release_owned_locally(
+        tx,
+        survivor.artist_id,
+        &survivor.identity.normalized_title,
+        mb_group,
+    )?;
+    let donor_owned = release_owned_locally(
+        tx,
+        donor.artist_id,
+        &donor.identity.normalized_title,
+        mb_group,
+    )?;
+    let title_from = if !survivor_owned && donor_owned {
+        &donor.identity
+    } else {
+        &survivor.identity
+    };
+    let release_type = if survivor.identity.mb_release_group_id.is_none()
+        && donor.identity.mb_release_group_id.is_some()
+    {
+        &donor.identity.release_type
+    } else {
+        &survivor.identity.release_type
+    };
+    let release_date = if !donor.identity.release_date.is_empty()
+        && donor.identity.release_date.len() > survivor.identity.release_date.len()
+    {
+        &donor.identity.release_date
+    } else {
+        &survivor.identity.release_date
+    };
+
+    // Prefer Deezer's cover when present, and carry its matching cached path.
+    let donor_has_better_cover = donor
+        .cover_url
+        .as_deref()
+        .is_some_and(|url| !url.is_empty())
+        && (survivor.cover_url.as_deref().is_none_or(str::is_empty)
+            || (survivor.identity.deezer_album_id.is_none()
+                && donor.identity.deezer_album_id.is_some()));
+    let (cover, alternate_cover) = if donor_has_better_cover {
+        (&donor, &survivor)
+    } else {
+        (&survivor, &donor)
+    };
+    let cover_path = cover.cover_local_path.as_deref().or_else(|| {
+        (cover.cover_url == alternate_cover.cover_url)
+            .then_some(alternate_cover.cover_local_path.as_deref())
+            .flatten()
+    });
+    let external_url = if survivor.identity.deezer_album_id.is_none()
+        && donor.identity.deezer_album_id.is_some()
+    {
+        donor
+            .external_url
+            .as_deref()
+            .or(survivor.external_url.as_deref())
+    } else {
+        survivor
+            .external_url
+            .as_deref()
+            .or(donor.external_url.as_deref())
+    };
+    let state = if donor_state > survivor_state {
+        &donor.state
+    } else {
+        &survivor.state
+    };
+    let discovered_at = survivor.discovered_at.as_str().min(&donor.discovered_at);
+    let provider = merge_provider_labels(&survivor.provider_source, &donor.provider_source);
+
+    tx.execute(
+        "UPDATE releases SET title = ?1, normalized_title = ?2, release_type = ?3,
+            release_date = ?4, deezer_album_id = ?5, mb_release_group_id = ?6,
+            cover_url = ?7, cover_local_path = ?8, external_url = ?9, musicbrainz_url = ?10,
+            track_count = ?11, explicit = ?12, owned_locally = ?13, state = ?14,
+            provider_source = ?15, discovered_at = ?16, updated_at = ?17
+         WHERE id = ?18",
+        params![
+            title_from.title,
+            title_from.normalized_title,
+            release_type,
+            release_date,
+            survivor
+                .identity
+                .deezer_album_id
+                .or(donor.identity.deezer_album_id),
+            mb_group,
+            cover.cover_url,
+            cover_path,
+            external_url,
+            survivor
+                .musicbrainz_url
+                .as_deref()
+                .or(donor.musicbrainz_url.as_deref()),
+            survivor.track_count.max(donor.track_count),
+            i32::from(survivor.explicit || donor.explicit),
+            i32::from(survivor_owned || donor_owned),
+            state,
+            provider,
+            discovered_at,
+            now_rfc3339_utc(),
+            survivor_id
+        ],
+    )?;
+
+    // Enrich overlapping positions, then move all remaining track rows without
+    // changing their IDs. The earlier compatibility check prevents mismatched
+    // tracklists from being blended together.
+    tx.execute(
+        "UPDATE release_tracks AS dst SET
+            title = CASE WHEN dst.title = '' THEN COALESCE((
+                SELECT src.title FROM release_tracks src WHERE src.release_id = ?2
+                  AND src.disc_number = dst.disc_number AND src.track_number = dst.track_number
+            ), dst.title) ELSE dst.title END,
+            duration_secs = MAX(dst.duration_secs, COALESCE((
+                SELECT src.duration_secs FROM release_tracks src WHERE src.release_id = ?2
+                  AND src.disc_number = dst.disc_number AND src.track_number = dst.track_number
+            ), 0)),
+            preview_url = COALESCE(NULLIF(dst.preview_url, ''), (
+                SELECT NULLIF(src.preview_url, '') FROM release_tracks src WHERE src.release_id = ?2
+                  AND src.disc_number = dst.disc_number AND src.track_number = dst.track_number
+            )),
+            artist_credit = COALESCE(NULLIF(dst.artist_credit, ''), (
+                SELECT NULLIF(src.artist_credit, '') FROM release_tracks src WHERE src.release_id = ?2
+                  AND src.disc_number = dst.disc_number AND src.track_number = dst.track_number
+            ))
+         WHERE dst.release_id = ?1",
+        params![survivor_id, donor_id],
+    )?;
+    tx.execute(
+        "UPDATE release_tracks SET release_id = ?1 WHERE release_id = ?2
+         AND NOT EXISTS (SELECT 1 FROM release_tracks dst WHERE dst.release_id = ?1
+             AND dst.disc_number = release_tracks.disc_number
+             AND dst.track_number = release_tracks.track_number)",
+        params![survivor_id, donor_id],
+    )?;
+    tx.execute(
+        "DELETE FROM release_tracks WHERE release_id = ?1",
+        params![donor_id],
+    )?;
+    tx.execute("DELETE FROM releases WHERE id = ?1", params![donor_id])?;
+    Ok(Some(survivor_id))
 }
 
 fn release_owned_locally(

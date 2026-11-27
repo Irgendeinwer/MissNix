@@ -23,9 +23,15 @@ pub(super) fn wire_radar_and_preview_callbacks(app: &AppWindow, state: &SharedUi
         app.on_navigate(move |view_idx| {
             let Some(win) = weak.upgrade() else { return };
             win.set_active_view(view_idx);
-            if view_idx == 1 && win.get_inspector_mode() == 1 {
+            if (view_idx == 1 && win.get_inspector_mode() == 1)
+                || (view_idx == 2 && win.get_inspector_mode() != 0)
+            {
+                // Settings need the available width and have no use for either
+                // inspector. The artist view also cannot show a release drawer.
                 win.set_inspector_mode(0);
                 win.set_selected_release_id(0);
+                win.set_selected_artist_id(0);
+                win.set_loading_tracks(false);
             }
             let mut guard = st.borrow_mut();
             match view_idx {

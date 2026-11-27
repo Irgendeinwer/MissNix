@@ -53,13 +53,16 @@ export component InspectorDrawer inherits Rectangle {
         (root.active-view == 0 || root.active-view == 1)
         && ((root.inspector-mode == 1 && root.selected-release-id > 0)
             || (root.inspector-mode == 2 && root.selected-artist-id > 0));
+    property <length> slide-offset: 404px;
+    animate slide-offset { duration: 150ms; easing: cubic-bezier(0.2, 0.0, 0.0, 1.0); }
+    changed drawer-open => { root.slide-offset = root.drawer-open ? 0px : 404px; }
     width: self.drawer-open ? 404px : 0px;
     horizontal-stretch: 0;
     background: Theme.surface-rail;
     clip: true;
 
-    animate width { duration: 190ms; easing: cubic-bezier(0.2, 0.0, 0.0, 1.0); }
-
+    // Reserve the final width in one step, so the radar grid reflows only once.
+    // The drawer contents slide independently instead of continuously resizing cards.
     Rectangle {
         x: 0px;
         width: 1px;
@@ -70,7 +73,9 @@ export component InspectorDrawer inherits Rectangle {
     // -----------------------------------------------------------------
     // MODE 1: RELEASE DETAILS INSPECTOR (with Quick Artist Mute/Hide)
     // -----------------------------------------------------------------
-    if self.drawer-open && root.inspector-mode == 1 : VerticalLayout {
+    VerticalLayout {
+        visible: root.drawer-open && root.inspector-mode == 1;
+        x: root.slide-offset;
         width: 404px;
         height: 100%;
         padding: 18px;
@@ -362,7 +367,9 @@ export component InspectorDrawer inherits Rectangle {
     // -----------------------------------------------------------------
     // MODE 2: ARTIST INSPECTOR (Full-Width Sticky Header + Mute/Hide)
     // -----------------------------------------------------------------
-    if self.drawer-open && root.inspector-mode == 2 : VerticalLayout {
+    VerticalLayout {
+        visible: root.drawer-open && root.inspector-mode == 2;
+        x: root.slide-offset;
         width: 404px;
         height: 100%;
         padding: 18px;

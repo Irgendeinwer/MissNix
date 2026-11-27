@@ -119,6 +119,41 @@ pub(super) fn refresh_feed(win: &AppWindow, state: &mut UiState) {
     }
 
     state.release_model.set_vec(cards);
+
+    // A sync can consolidate away the row that was open when it started. Do
+    // not leave a drawer or player pointing at a deleted release; surviving
+    // rows may also have gained provider metadata and transferred tracks.
+    let selected_id = win.get_selected_release_id() as i64;
+    if win.get_inspector_mode() == 1 && selected_id > 0 {
+        match state.db.get_release(selected_id) {
+            Ok(Some(release)) => {
+                win.set_selected_release(to_release_card(
+                    &release,
+                    state.decoded_covers.get(&selected_id),
+                ));
+                if let Ok(tracks) = state.db.list_release_tracks(selected_id)
+                    && !tracks.is_empty()
+                {
+                    win.set_selected_release_tracks(tracks_to_model(&tracks));
+                    win.set_loading_tracks(false);
+                }
+            }
+            Ok(None) => {
+                win.set_inspector_mode(0);
+                win.set_selected_release_id(0);
+                win.set_loading_tracks(false);
+            }
+            Err(_) => {}
+        }
+    }
+    if win.get_preview_active()
+        && matches!(
+            state.db.get_release(win.get_preview_release_id() as i64),
+            Ok(None)
+        )
+    {
+        state.audio.stop();
+    }
     refresh_folders_and_stats(win, state);
 }
 

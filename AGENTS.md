@@ -34,7 +34,8 @@ MissNix/
 │       │   ├── schema.rs             # Canonical DDL,SCHEMA_VERSION migrations, schema validation
 │       │   ├── folders.rs            # Library folder CRUD & scan-outcome reconciliation
 │       │   ├── artists.rs            # Artist queries, status transitions, manual additions
-│       │   ├── releases.rs           # Release upsert, edition deduplication, feed queries, tracks
+│       │   ├── releases.rs           # Transactional release consolidation, feed queries, tracks
+│       │   ├── release_match.rs      # Conservative provider-ID, title, date and ambiguity matching
 │       │   ├── settings.rs           # Typed key-value AppSettings load/save
 │       │   └── tests.rs              # Offline SQLite migration, deduplication, and settings tests
 │       ├── scanner/                  # Local filesystem & audio metadata scanner
@@ -78,7 +79,7 @@ MissNix/
 ├── assets/
 │   ├── missnix.svg                   # Desktop launcher icon (hicolor/scalable/apps/missnix.svg)
 │   ├── icons/*.svg                   # Monochrome #FFFFFF vector icons tinted via Slint Image.colorize
-│   └── docs/                         # Muted README artwork and paths for real app screenshots
+│   └── docs/                         # README SVG artwork and app screenshots
 └── .github/workflows/
     ├── ci.yml                        # Cargo + Determinate Nix Flake CI with Magic Nix Cache & rust-cache
     └── release.yml                   # Immutable SLSA-attested AppImage + tar.gz GitHub Release pipeline

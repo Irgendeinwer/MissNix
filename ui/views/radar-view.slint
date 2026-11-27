@@ -4,6 +4,7 @@ import { FolderRowData, ReleaseCardData } from "../models.slint";
 import {
     M3Button,
     M3FilterChip,
+    M3HorizontalScrollBar,
     M3ScrollBar,
     M3SearchField,
     M3Select,
@@ -65,10 +66,19 @@ export component RadarView inherits VerticalLayout {
             spacing: 11px;
             alignment: start;
 
-            HorizontalLayout {
-                spacing: 10px;
+            // At narrower widths the title and actions get separate rows.
+            // The optional artist actions can scroll rather than disappearing
+            // under the inspector, even for unusually long artist names.
+            heading := Rectangle {
+                property <bool> stacked: self.width < 700px || root.filtered-artist-id > 0;
+                height: self.stacked ? 90px : 40px;
+                vertical-stretch: 0;
 
                 VerticalLayout {
+                    x: 0px;
+                    y: 0px;
+                    width: heading.stacked ? heading.width : max(0px, heading.width - 305px);
+                    height: 40px;
                     alignment: center;
                     spacing: 2px;
                     Text {
@@ -76,99 +86,149 @@ export component RadarView inherits VerticalLayout {
                         font-size: 21px;
                         font-weight: 800;
                         color: Theme.on-surface;
+                        overflow: elide;
                     }
                     Text {
                         text: "New, upcoming, and catalog releases across your tracked artists";
                         font-size: 12px;
                         color: Theme.on-surface-variant;
+                        overflow: elide;
                     }
                 }
 
-                Rectangle { horizontal-stretch: 1; }
+                action-scroll := ScrollView {
+                    x: heading.stacked ? 0px : max(0px, heading.width - 300px);
+                    y: heading.stacked ? 46px : 0px;
+                    width: heading.stacked ? heading.width : min(300px, heading.width);
+                    height: 48px;
+                    vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+                    horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+                    content-width: max(self.visible-width, action-row.preferred-width);
+                    content-height: 36px;
 
-                if root.filtered-artist-id > 0 : HorizontalLayout {
-                    spacing: 6px;
+                    action-row := HorizontalLayout {
+                        x: 0px;
+                        y: 0px;
+                        width: self.preferred-width;
+                        height: 36px;
+                        spacing: 10px;
 
-                    TonalBadge {
-                        y: (parent.height - self.height) / 2;
-                        label: "ARTIST: \{root.filtered-artist-name}";
-                        badge-bg: Theme.primary-container;
-                        badge-fg: Theme.on-primary-container;
-                    }
-
-                    M3Button {
-                        y: (parent.height - self.height) / 2;
-                        compact: true;
-                        variant: root.filtered-artist-status == "muted" ? "primary-tonal" : "outlined";
-                        has-icon: true;
-                        icon: root.filtered-artist-status == "muted"
-                            ? @image-url("../../assets/icons/volume-on.svg")
-                            : @image-url("../../assets/icons/volume-off.svg");
-                        text: root.filtered-artist-status == "muted" ? "Unmute" : "Mute";
-                        clicked => { root.toggle-artist-mute(root.filtered-artist-id); }
-                    }
-
-                    M3Button {
-                        y: (parent.height - self.height) / 2;
-                        compact: true;
-                        variant: root.filtered-artist-status == "ignored" || root.filtered-artist-status == "missing" ? "primary-tonal" : "danger";
-                        has-icon: true;
-                        icon: root.filtered-artist-status == "missing"
-                            ? @image-url("../../assets/icons/plus.svg")
-                            : @image-url("../../assets/icons/eye-off.svg");
-                        text: root.filtered-artist-status == "missing" ? "Track"
-                            : root.filtered-artist-status == "ignored" ? "Restore" : "Hide";
-                        clicked => { root.toggle-artist-ignore(root.filtered-artist-id); }
-                    }
-
-                    M3Button {
-                        y: (parent.height - self.height) / 2;
-                        compact: true;
-                        variant: "outlined";
-                        has-icon: true;
-                        icon: @image-url("../../assets/icons/close.svg");
-                        text: "Clear";
-                        clicked => { root.clear-artist-feed-filter(); }
+                        if root.filtered-artist-id > 0 : HorizontalLayout {
+                            spacing: 6px;
+                            TonalBadge {
+                                y: (parent.height - self.height) / 2;
+                                label: "ARTIST: \{root.filtered-artist-name}";
+                                badge-bg: Theme.primary-container;
+                                badge-fg: Theme.on-primary-container;
+                            }
+                            M3Button {
+                                y: (parent.height - self.height) / 2;
+                                compact: true;
+                                variant: root.filtered-artist-status == "muted" ? "primary-tonal" : "outlined";
+                                has-icon: true;
+                                icon: root.filtered-artist-status == "muted"
+                                    ? @image-url("../../assets/icons/volume-on.svg")
+                                    : @image-url("../../assets/icons/volume-off.svg");
+                                text: root.filtered-artist-status == "muted" ? "Unmute" : "Mute";
+                                clicked => { root.toggle-artist-mute(root.filtered-artist-id); }
+                            }
+                            M3Button {
+                                y: (parent.height - self.height) / 2;
+                                compact: true;
+                                variant: root.filtered-artist-status == "ignored" || root.filtered-artist-status == "missing" ? "primary-tonal" : "danger";
+                                has-icon: true;
+                                icon: root.filtered-artist-status == "missing"
+                                    ? @image-url("../../assets/icons/plus.svg")
+                                    : @image-url("../../assets/icons/eye-off.svg");
+                                text: root.filtered-artist-status == "missing" ? "Track"
+                                    : root.filtered-artist-status == "ignored" ? "Restore" : "Hide";
+                                clicked => { root.toggle-artist-ignore(root.filtered-artist-id); }
+                            }
+                            M3Button {
+                                y: (parent.height - self.height) / 2;
+                                compact: true;
+                                variant: "outlined";
+                                has-icon: true;
+                                icon: @image-url("../../assets/icons/close.svg");
+                                text: "Clear";
+                                clicked => { root.clear-artist-feed-filter(); }
+                            }
+                        }
+                        M3Switch {
+                            y: (parent.height - self.height) / 2;
+                            text: "Hide owned";
+                            checked <=> root.feed-hide-owned;
+                            toggled => { root.feed-filters-changed(); }
+                        }
+                        M3Button {
+                            y: (parent.height - self.height) / 2;
+                            variant: "primary-tonal";
+                            has-icon: true;
+                            icon: @image-url("../../assets/icons/done-all.svg");
+                            text: "Mark Filtered Seen";
+                            enabled: root.filtered-unseen-count > 0;
+                            clicked => { root.mark-all-seen(); }
+                        }
                     }
                 }
-
-                M3Switch {
-                    y: (parent.height - self.height) / 2;
-                    text: "Hide owned";
-                    checked <=> root.feed-hide-owned;
-                    toggled => { root.feed-filters-changed(); }
-                }
-
-                M3Button {
-                    y: (parent.height - self.height) / 2;
-                    variant: "primary-tonal";
-                    has-icon: true;
-                    icon: @image-url("../../assets/icons/done-all.svg");
-                    text: "Mark Filtered Seen";
-                    enabled: root.filtered-unseen-count > 0;
-                    clicked => { root.mark-all-seen(); }
+                M3HorizontalScrollBar {
+                    x: action-scroll.x;
+                    y: action-scroll.y + 38px;
+                    width: action-scroll.visible-width;
+                    page-size: action-scroll.visible-width;
+                    maximum: max(0px, action-scroll.content-width - action-scroll.visible-width);
+                    value: -action-scroll.content-x;
+                    scrolled(val) => { action-scroll.content-x = -val; }
                 }
             }
 
-            // Unified Filter Row (Search + Status Chips + Type Chips + Sort)
-            HorizontalLayout {
-                spacing: 8px;
+            // Keep search, sort, and all filter chips accessible when the
+            // inspector narrows the radar. Only the chips need to scroll at
+            // very small widths; the search field remains the same instance.
+            filter-bar := Rectangle {
+                property <bool> narrow: self.width < chip-row.preferred-width + 344px;
+                property <bool> stacked: self.width < 340px;
+                height: self.stacked ? 124px : self.narrow ? 84px : 44px;
+                vertical-stretch: 0;
 
                 feed-search-input := M3SearchField {
-                    min-width: 170px;
-                    max-width: 290px;
-                    horizontal-stretch: 1;
+                    x: 0px;
+                    y: 0px;
+                    width: filter-bar.stacked ? filter-bar.width
+                        : filter-bar.narrow ? max(0px, filter-bar.width - 166px)
+                        : min(290px, max(170px, filter-bar.width - chip-row.preferred-width - 174px));
+                    height: 34px;
                     text <=> root.feed-search-text;
                     placeholder: "Search artist or release...  (/)";
                     edited => { root.feed-filters-changed(); }
                 }
 
-                VerticalLayout {
-                    alignment: center;
-                    horizontal-stretch: 0;
+                sort-select := M3Select {
+                    x: filter-bar.stacked ? 0px : max(0px, filter-bar.width - self.width);
+                    y: filter-bar.stacked ? 40px : 0px;
+                    width: min(158px, filter-bar.width);
+                    height: 34px;
+                    model: ["Newest First", "Upcoming First", "Artist A–Z"];
+                    current-index <=> root.feed-sort-index;
+                    selected => { root.feed-filters-changed(); }
+                }
 
-                    HorizontalLayout {
+                chip-scroll := ScrollView {
+                    x: filter-bar.narrow ? 0px : feed-search-input.width + 8px;
+                    y: filter-bar.stacked ? 80px : filter-bar.narrow ? 40px : 0px;
+                    width: filter-bar.narrow ? filter-bar.width : max(0px, sort-select.x - self.x - 8px);
+                    // Material ScrollView reserves 12px even with its scrollbar off.
+                    height: 44px;
+                    vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+                    horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+                    content-width: max(self.visible-width, chip-row.preferred-width);
+                    content-height: 32px;
+
+                    chip-row := HorizontalLayout {
+                        x: 0px;
+                        y: 0px;
                         spacing: 5px;
+                        width: self.preferred-width;
                         height: 32px;
 
                         M3FilterChip {
@@ -195,14 +255,12 @@ export component RadarView inherits VerticalLayout {
                                 root.feed-filters-changed();
                             }
                         }
-
                         Rectangle {
                             width: 1px;
                             height: 20px;
                             y: 6px;
                             background: Theme.outline-variant;
                         }
-
                         M3FilterChip {
                             label: "All Types";
                             selected: root.feed-type-index == 0;
@@ -238,15 +296,14 @@ export component RadarView inherits VerticalLayout {
                     }
                 }
 
-                Rectangle { horizontal-stretch: 1; }
-
-                M3Select {
-                    width: 158px;
-                    height: 34px;
-                    y: (parent.height - self.height) / 2;
-                    model: ["Newest First", "Upcoming First", "Artist A–Z"];
-                    current-index <=> root.feed-sort-index;
-                    selected => { root.feed-filters-changed(); }
+                M3HorizontalScrollBar {
+                    x: chip-scroll.x;
+                    y: chip-scroll.y + 34px;
+                    width: chip-scroll.visible-width;
+                    page-size: chip-scroll.visible-width;
+                    maximum: max(0px, chip-scroll.content-width - chip-scroll.visible-width);
+                    value: -chip-scroll.content-x;
+                    scrolled(val) => { chip-scroll.content-x = -val; }
                 }
             }
         }
@@ -349,7 +406,8 @@ export component RadarView inherits VerticalLayout {
         }
     }
 
-    // Smooth Viewport-Culled Multi-Column Cover Grid (Zero Resize Jitter)
+    // Viewport-culled cover grid. The inspector reserves its final width at once,
+    // avoiding repeated column changes while the drawer slides into place.
     if root.releases.length > 0 : Rectangle {
         vertical-stretch: 1;
         clip: true;
@@ -365,8 +423,11 @@ export component RadarView inherits VerticalLayout {
                                          : 200px;
             property <length> gap: 14px;
             property <length> pad: 20px;
-            property <length> avail-w: max(320px, self.visible-width - 2 * self.pad);
-            property <int> cols: max(2, min(10, Math.floor((self.avail-w + self.gap) / (self.target-cell + self.gap))));
+            property <length> avail-w: max(1px, self.visible-width - 2 * self.pad);
+            // At the minimum window width the inspector may leave room for
+            // only one card. Never keep an inaccessible clipped second column.
+            property <int> cols: self.avail-w < 2 * 145px + self.gap ? 1
+                : max(2, min(10, Math.floor((self.avail-w + self.gap) / (self.target-cell + self.gap))));
             property <length> card-w: (self.avail-w - (self.cols - 1) * self.gap) / self.cols;
             property <length> card-h: self.card-w + 76px;
             property <int> total-rows: Math.ceil(root.releases.length / self.cols);
@@ -375,13 +436,42 @@ export component RadarView inherits VerticalLayout {
             content-width: self.visible-width;
             content-height: max(self.visible-height, self.pad * 2 + self.total-rows * self.card-h + max(0, self.total-rows - 1) * self.gap);
 
+            function reveal-card(top: length, card-height: length) {
+                let view-top = -self.content-y;
+                let margin = 12px;
+                let max-scroll = max(0px, self.content-height - self.visible-height);
+                if (top < view-top + margin || card-height > self.visible-height - 2 * margin) {
+                    self.content-y = -min(max-scroll, max(0px, top - margin));
+                } else if (top + card-height > view-top + self.visible-height - margin) {
+                    self.content-y = -min(max-scroll, max(0px, top + card-height - self.visible-height + margin));
+                }
+            }
+
             for item[idx] in root.releases : Rectangle {
                 property <int> row-idx: Math.floor(idx / feed-scroll.cols);
                 property <int> col-idx: Math.mod(idx, feed-scroll.cols);
                 property <length> item-y: feed-scroll.pad + self.row-idx * (feed-scroll.card-h + feed-scroll.gap);
+                property <length> viewport-height: feed-scroll.visible-height;
+                property <bool> selected-card: root.inspector-mode == 1 && root.selected-release-id == item.id;
                 property <bool> in-viewport:
                     (self.item-y + feed-scroll.card-h >= feed-scroll.scroll-top - feed-scroll.card-h)
                     && (self.item-y <= feed-scroll.scroll-top + feed-scroll.visible-height + feed-scroll.card-h);
+
+                // Selection and the final grid geometry can update separately. Keep
+                // the active item visible after either change, without following
+                // the selection when the user subsequently scrolls by hand.
+                changed selected-card => {
+                    if self.selected-card { feed-scroll.reveal-card(self.item-y, self.height); }
+                }
+                changed item-y => {
+                    if self.selected-card { feed-scroll.reveal-card(self.item-y, self.height); }
+                }
+                changed height => {
+                    if self.selected-card { feed-scroll.reveal-card(self.item-y, self.height); }
+                }
+                changed viewport-height => {
+                    if self.selected-card { feed-scroll.reveal-card(self.item-y, self.height); }
+                }
 
                 x: feed-scroll.pad + self.col-idx * (feed-scroll.card-w + feed-scroll.gap);
                 y: self.item-y;
@@ -392,7 +482,7 @@ export component RadarView inherits VerticalLayout {
                     width: 100%;
                     height: 100%;
                     data: item;
-                    selected: root.inspector-mode == 1 && root.selected-release-id == item.id;
+                    selected: parent.selected-card;
                     playing-this-release: root.preview-active && root.preview-playing && root.preview-release-id == item.id;
 
                     select-release(id) => { root.select-release(id); }
