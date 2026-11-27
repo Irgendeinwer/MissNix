@@ -3,7 +3,7 @@ pub mod musicbrainz;
 
 use serde::{Deserialize, Serialize};
 
-pub const USER_AGENT: &str = "MissNix/0.1.0 ( https://github.com/Irgendeinwer/MissNix )";
+pub const USER_AGENT: &str = "MissNix/1.0.1 ( https://github.com/Irgendeinwer/MissNix )";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArtistSearchCandidate {
