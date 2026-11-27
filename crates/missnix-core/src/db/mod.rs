@@ -7,9 +7,9 @@ mod settings;
 mod tests;
 
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use rusqlite::Connection;
+use rusqlite::{Connection, ErrorCode, TransactionBehavior};
 
 use crate::error::{CoreError, CoreResult};
 use crate::models::{LibraryStats, ReleaseType};
@@ -18,6 +18,50 @@ pub use self::folders::LibraryScanSnapshot;
 use self::schema::{
     CANONICAL_DDL, SCHEMA_VERSION, is_canonical_schema_valid, is_partial_canonical_schema_valid,
 };
+
+fn validate_compatible_schema(conn: &Connection, db_path: Option<&Path>) -> CoreResult<()> {
+    let version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    let application_id: i64 = conn.query_row("PRAGMA application_id", [], |r| r.get(0))?;
+    let existing_objects: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'",
+        [],
+        |r| r.get(0),
+    )?;
+    let empty = existing_objects == 0 && version == 0 && application_id == 0;
+    if !(0..=SCHEMA_VERSION).contains(&version)
+        || (!empty
+            && !is_canonical_schema_valid(conn)?
+            && !is_partial_canonical_schema_valid(conn)?)
+    {
+        let database = db_path
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "in-memory database".to_string());
+        return Err(CoreError::Validation(format!(
+            "Unrecognized or newer database schema in {database}. No migration was performed; \
+             use a compatible database or restore a backup."
+        )));
+    }
+    Ok(())
+}
+
+fn enable_wal_with_retry(conn: &Connection, timeout: Duration) -> CoreResult<()> {
+    let started = Instant::now();
+    loop {
+        match conn.execute_batch("PRAGMA journal_mode = WAL;") {
+            Ok(()) => return Ok(()),
+            // SQLite can bypass its busy handler when two connections change journal
+            // mode at once. Retrying outside a transaction lets the other opener finish.
+            Err(err)
+                if err.sqlite_error_code() == Some(ErrorCode::DatabaseBusy)
+                    && started.elapsed() < timeout =>
+            {
+                let remaining = timeout.saturating_sub(started.elapsed());
+                std::thread::sleep(Duration::from_millis(10).min(remaining));
+            }
+            Err(err) => return Err(err.into()),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct DiscoveredReleaseInput {
@@ -71,40 +115,25 @@ impl Database {
     }
 
     fn configure_and_migrate(&mut self, db_path: Option<&Path>) -> CoreResult<()> {
-        self.conn.busy_timeout(Duration::from_millis(5000))?;
+        const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+        self.conn.busy_timeout(BUSY_TIMEOUT)?;
 
         // Validate before changing journal mode or writing any schema. A path supplied via
         // --db may be an unrelated SQLite database, and a newer/legacy schema is not safe
         // to rebuild by guessing which tables or columns contain user data.
-        let version: i32 = self
-            .conn
-            .query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        let application_id: i64 = self
-            .conn
-            .query_row("PRAGMA application_id", [], |r| r.get(0))?;
-        let existing_objects: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'",
-            [],
-            |r| r.get(0),
-        )?;
-        let empty = existing_objects == 0 && version == 0 && application_id == 0;
-        if !(0..=SCHEMA_VERSION).contains(&version)
-            || (!empty
-                && !is_canonical_schema_valid(&self.conn)?
-                && !is_partial_canonical_schema_valid(&self.conn)?)
-        {
-            let database = db_path
-                .map(|path| path.display().to_string())
-                .unwrap_or_else(|| "in-memory database".to_string());
-            return Err(CoreError::Validation(format!(
-                "Unrecognized or newer database schema in {database}. No migration was performed; \
-                 use a compatible database or restore a backup."
-            )));
-        }
+        validate_compatible_schema(&self.conn, db_path)?;
+        enable_wal_with_retry(&self.conn, BUSY_TIMEOUT)?;
+        self.conn.execute_batch("PRAGMA synchronous = NORMAL;")?;
 
-        self.conn
-            .execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")?;
-        let tx = self.conn.transaction()?;
+        // Grab the write lock before reading the schema in the transaction. A deferred
+        // transaction can acquire an old WAL snapshot, then fail immediately with BUSY
+        // when another connection updates user_version before this one upgrades to write.
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        // Another connection may have initialized or changed the database since the
+        // first validation, so check again while holding the migration lock.
+        validate_compatible_schema(&tx, db_path)?;
         tx.execute_batch(CANONICAL_DDL)?;
         tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         tx.commit()?;

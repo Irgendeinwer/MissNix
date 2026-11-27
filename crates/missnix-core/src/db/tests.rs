@@ -724,6 +724,67 @@ fn release_updates_keep_ownership_and_prefer_deezer_cover() {
 }
 
 #[test]
+fn concurrent_database_opens_initialize_and_reopen_safely() {
+    use std::sync::{Arc, Barrier};
+
+    let dir = unique_test_dir("concurrent_open");
+    let existing_path = dir.join("existing.db");
+    let existing = Database::open(&existing_path).unwrap();
+    existing
+        .add_manual_artist("Persisted Artist", None, None, None, None, None)
+        .unwrap();
+
+    // Exercise both simultaneous first-time WAL setup and simultaneous schema
+    // validation/migration on an existing database. Wait before the fallible open,
+    // so a failure cannot strand the other worker on a barrier.
+    for round in 0..32 {
+        let fresh_path = dir.join(format!("fresh-{round}.db"));
+        for (path, expected_artists) in [(&fresh_path, 0), (&existing_path, 1)] {
+            let barrier = Arc::new(Barrier::new(2));
+            let mut joins = Vec::new();
+            for _ in 0..2 {
+                let path = path.clone();
+                let barrier = barrier.clone();
+                joins.push(std::thread::spawn(move || {
+                    barrier.wait();
+                    Database::open(&path)?.library_stats()
+                }));
+            }
+            for join in joins {
+                let stats = join.join().unwrap().unwrap();
+                assert_eq!(stats.total_artists, expected_artists);
+            }
+        }
+    }
+    assert_eq!(existing.library_stats().unwrap().total_artists, 1);
+    drop(existing);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn wal_switch_retry_is_bounded_when_another_connection_holds_a_lock() {
+    let dir = unique_test_dir("wal_busy");
+    let path = dir.join("busy.db");
+    let blocker = Connection::open(&path).unwrap();
+    let waiting = Connection::open(&path).unwrap();
+    waiting.busy_timeout(Duration::ZERO).unwrap();
+    blocker
+        .execute_batch("CREATE TABLE marker (value TEXT); BEGIN EXCLUSIVE;")
+        .unwrap();
+
+    let err = enable_wal_with_retry(&waiting, Duration::from_millis(25)).unwrap_err();
+    assert!(matches!(
+        err,
+        CoreError::Database(ref e) if e.sqlite_error_code() == Some(ErrorCode::DatabaseBusy)
+    ));
+    blocker.execute_batch("ROLLBACK;").unwrap();
+    enable_wal_with_retry(&waiting, Duration::from_millis(25)).unwrap();
+    drop(waiting);
+    drop(blocker);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn concurrent_release_upserts_do_not_create_duplicate_rows() {
     use std::sync::{Arc, Barrier};
     let dir = unique_test_dir("concurrent_upsert");
@@ -732,16 +793,19 @@ fn concurrent_release_upserts_do_not_create_duplicate_rows() {
     let artist = db
         .add_manual_artist("Example", None, None, None, None, None)
         .unwrap();
+    // Open both connections before spawning: if an open fails, no worker is left
+    // waiting forever at the upsert barrier.
+    let connections = (0..2)
+        .map(|_| Database::open(&db_path).unwrap())
+        .collect::<Vec<_>>();
     let barrier = Arc::new(Barrier::new(2));
     let mut joins = Vec::new();
-    for _ in 0..2 {
-        let db_path = db_path.clone();
+    for worker_db in connections {
         let barrier = barrier.clone();
         let input = test_release(artist.id, "Same Release", "deezer");
         joins.push(std::thread::spawn(move || {
-            let db = Database::open(&db_path).unwrap();
             barrier.wait();
-            db.upsert_discovered_release(&input).unwrap()
+            worker_db.upsert_discovered_release(&input).unwrap()
         }));
     }
     let first = joins.remove(0).join().unwrap();
