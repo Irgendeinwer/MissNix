@@ -25,27 +25,26 @@
         let
           inherit (pkgs) lib stdenv;
 
-          runtimeGuiLibs =
-            [
-              pkgs.expat
-              pkgs.fontconfig
-              pkgs.freetype
-              pkgs.zlib
-            ]
-            ++ lib.optionals stdenv.hostPlatform.isLinux [
-              pkgs.libGL
-              pkgs.vulkan-loader
-              pkgs.wayland
-              pkgs.libxkbcommon
-              pkgs.libx11
-              pkgs.libxcb
-              pkgs.libxcursor
-              pkgs.libxi
-              pkgs.libxrandr
-              pkgs.libxxf86vm
-              pkgs.libpulseaudio
-              pkgs.alsa-lib
-            ];
+          runtimeGuiLibs = [
+            pkgs.expat
+            pkgs.fontconfig
+            pkgs.freetype
+            pkgs.zlib
+          ]
+          ++ lib.optionals stdenv.hostPlatform.isLinux [
+            pkgs.libGL
+            pkgs.vulkan-loader
+            pkgs.wayland
+            pkgs.libxkbcommon
+            pkgs.libx11
+            pkgs.libxcb
+            pkgs.libxcursor
+            pkgs.libxi
+            pkgs.libxrandr
+            pkgs.libxxf86vm
+            pkgs.libpulseaudio
+            pkgs.alsa-lib
+          ];
 
           desktopItem = pkgs.makeDesktopItem {
             name = "missnix";
@@ -73,27 +72,35 @@
           pname = "missnix";
           version = pkgVersion;
 
-          src = lib.cleanSource self;
+          src = lib.fileset.toSource {
+            root = ./.;
+            fileset = lib.fileset.unions [
+              ./Cargo.toml
+              ./Cargo.lock
+              ./build.rs
+              ./src
+              ./ui
+              ./crates
+              ./assets/icons
+              ./assets/missnix.svg
+            ];
+          };
 
           cargoLock = {
             lockFile = ./Cargo.lock;
           };
 
-          nativeBuildInputs =
-            [
-              pkgs.cmake
-              pkgs.pkg-config
-              pkgs.makeWrapper
-            ]
-            ++ lib.optionals stdenv.hostPlatform.isLinux [
-              pkgs.copyDesktopItems
-            ];
+          nativeBuildInputs = [
+            pkgs.cmake
+            pkgs.pkg-config
+            pkgs.makeWrapper
+          ]
+          ++ lib.optionals stdenv.hostPlatform.isLinux [
+            pkgs.copyDesktopItems
+          ];
 
           buildInputs =
             runtimeGuiLibs
-            ++ [
-              pkgs.sqlite
-            ]
             ++ lib.optionals stdenv.hostPlatform.isLinux [
               pkgs.libxcb.dev
             ];
@@ -116,6 +123,7 @@
               --prefix LD_LIBRARY_PATH : "${lib.makeLibraryPath runtimeGuiLibs}" \
               --suffix PATH : "${
                 lib.makeBinPath [
+                  pkgs.libnotify
                   pkgs.xdg-utils
                   pkgs.zenity
                 ]
@@ -134,6 +142,16 @@
     {
       overlays.default = final: _prev: {
         missnix = mkMissnix final;
+      };
+
+      nixosModules = {
+        missnix = import ./nix/nixos-module.nix self;
+        default = self.nixosModules.missnix;
+      };
+
+      homeManagerModules = {
+        missnix = import ./nix/hm-module.nix self;
+        default = self.homeManagerModules.missnix;
       };
 
       packages = forAllSystems (
@@ -167,24 +185,23 @@
         let
           pkgs = nixpkgs.legacyPackages.${system};
           inherit (pkgs) lib stdenv;
-          guiLibs =
-            [
-              pkgs.fontconfig
-              pkgs.freetype
-            ]
-            ++ lib.optionals stdenv.hostPlatform.isLinux [
-              pkgs.libGL
-              pkgs.vulkan-loader
-              pkgs.wayland
-              pkgs.libxkbcommon
-              pkgs.libx11
-              pkgs.libxcb
-              pkgs.libxcursor
-              pkgs.libxi
-              pkgs.libxrandr
-              pkgs.libpulseaudio
-              pkgs.alsa-lib
-            ];
+          guiLibs = [
+            pkgs.fontconfig
+            pkgs.freetype
+          ]
+          ++ lib.optionals stdenv.hostPlatform.isLinux [
+            pkgs.libGL
+            pkgs.vulkan-loader
+            pkgs.wayland
+            pkgs.libxkbcommon
+            pkgs.libx11
+            pkgs.libxcb
+            pkgs.libxcursor
+            pkgs.libxi
+            pkgs.libxrandr
+            pkgs.libpulseaudio
+            pkgs.alsa-lib
+          ];
         in
         {
           default = pkgs.mkShell {
