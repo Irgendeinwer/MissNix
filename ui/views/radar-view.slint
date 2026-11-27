@@ -111,10 +111,13 @@ export component RadarView inherits VerticalLayout {
                     M3Button {
                         y: (parent.height - self.height) / 2;
                         compact: true;
-                        variant: root.filtered-artist-status == "ignored" ? "primary-tonal" : "danger";
+                        variant: root.filtered-artist-status == "ignored" || root.filtered-artist-status == "missing" ? "primary-tonal" : "danger";
                         has-icon: true;
-                        icon: @image-url("../../assets/icons/eye-off.svg");
-                        text: root.filtered-artist-status == "ignored" ? "Restore" : "Hide";
+                        icon: root.filtered-artist-status == "missing"
+                            ? @image-url("../../assets/icons/plus.svg")
+                            : @image-url("../../assets/icons/eye-off.svg");
+                        text: root.filtered-artist-status == "missing" ? "Track"
+                            : root.filtered-artist-status == "ignored" ? "Restore" : "Hide";
                         clicked => { root.toggle-artist-ignore(root.filtered-artist-id); }
                     }
 

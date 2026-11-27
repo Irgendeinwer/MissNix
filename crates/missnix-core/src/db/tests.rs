@@ -824,3 +824,29 @@ fn manual_search_does_not_overwrite_a_different_same_name_identity() {
         artist.id
     );
 }
+
+#[test]
+fn stale_provider_checks_cannot_overwrite_ids_or_add_wrong_releases() {
+    let db = Database::open_in_memory().unwrap();
+    let stale = db
+        .add_manual_artist("Example", None, Some(1), None, None, None)
+        .unwrap();
+    db.override_artist_ids(stale.id, None, Some(2)).unwrap();
+    assert!(
+        db.update_artist_provider_links(&stale, None, Some(1), None, None, None)
+            .is_err()
+    );
+    let release = test_release(stale.id, "Wrong Artist's Album", "deezer");
+    assert!(
+        db.upsert_discovered_release_if_ids_match(&release, None, Some(1))
+            .is_err()
+    );
+    assert!(
+        db.mark_artist_checked_if_ids_match(stale.id, None, Some(1))
+            .is_err()
+    );
+    let current = db.get_artist(stale.id).unwrap().unwrap();
+    assert_eq!(current.deezer_id, Some(2));
+    assert_eq!(current.last_checked_at, None);
+    assert_eq!(current.discovered_release_count, 0);
+}

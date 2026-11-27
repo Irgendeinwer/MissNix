@@ -141,7 +141,8 @@ missnix [OPTIONS]
   rebuild. Keep the original database and any SQLite `-wal`/`-shm` files together; use a
   verified backup or an explicit migration rather than opening unrelated files as MissNix
   databases. Existing incorrect provider IDs from earlier scans can be corrected in an
-  artist's details.
+  artist's details. Same-name search results are kept separate, but the database currently
+  supports only one artist per normalized name; distinct homonyms cannot yet both be tracked.
 - A partial or failed provider check is shown as a warning; `--check` exits non-zero if
   any artist was not fully checked. Successfully fetched releases are retained. The
   **Mark Filtered Seen** action only changes releases matching the current radar filters.

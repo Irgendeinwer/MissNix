@@ -306,7 +306,7 @@ impl SyncEngine {
 
         if links_changed {
             db.update_artist_provider_links(
-                artist.id,
+                artist,
                 mbid.as_deref(),
                 deezer_id,
                 disambiguation.as_deref(),
@@ -332,7 +332,11 @@ impl SyncEngine {
                         }) {
                             continue;
                         }
-                        let (_, inserted, owned) = db.upsert_discovered_release(&rel)?;
+                        let (_, inserted, owned) = db.upsert_discovered_release_if_ids_match(
+                            &rel,
+                            mbid.as_deref(),
+                            deezer_id,
+                        )?;
                         if inserted {
                             stats.new_releases_added += 1;
                         } else {
@@ -364,7 +368,11 @@ impl SyncEngine {
                         }) {
                             continue;
                         }
-                        let (_, inserted, owned) = db.upsert_discovered_release(&rel)?;
+                        let (_, inserted, owned) = db.upsert_discovered_release_if_ids_match(
+                            &rel,
+                            mbid.as_deref(),
+                            deezer_id,
+                        )?;
                         if inserted {
                             stats.new_releases_added += 1;
                         } else {
@@ -399,7 +407,7 @@ impl SyncEngine {
         }
 
         if provider_errors.is_empty() {
-            db.mark_artist_checked(artist.id)?;
+            db.mark_artist_checked_if_ids_match(artist.id, mbid.as_deref(), deezer_id)?;
         } else {
             // Preserve successful results, but do not claim a full check or advance
             // the last-checked timestamp when an enabled provider failed.

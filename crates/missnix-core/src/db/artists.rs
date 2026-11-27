@@ -188,7 +188,7 @@ impl Database {
 
     pub fn update_artist_provider_links(
         &self,
-        artist_id: i64,
+        previous: &Artist,
         mbid: Option<&str>,
         deezer_id: Option<i64>,
         disambiguation: Option<&str>,
@@ -196,7 +196,7 @@ impl Database {
         external_url: Option<&str>,
     ) -> CoreResult<()> {
         let now = now_rfc3339_utc();
-        self.conn.execute(
+        let updated = self.conn.execute(
             "UPDATE artists SET
                 mbid = COALESCE(?1, mbid),
                 deezer_id = COALESCE(?2, deezer_id),
@@ -204,7 +204,7 @@ impl Database {
                 avatar_url = COALESCE(?4, avatar_url),
                 external_url = COALESCE(?5, external_url),
                 updated_at = ?6
-             WHERE id = ?7",
+             WHERE id = ?7 AND mbid IS ?8 AND deezer_id IS ?9",
             params![
                 mbid.filter(|s| !s.is_empty()),
                 deezer_id,
@@ -212,9 +212,16 @@ impl Database {
                 avatar_url.filter(|s| !s.is_empty()),
                 external_url.filter(|s| !s.is_empty()),
                 now,
-                artist_id
+                previous.id,
+                previous.mbid,
+                previous.deezer_id
             ],
         )?;
+        if updated == 0 {
+            return Err(CoreError::Validation(
+                "Artist provider IDs changed during the check; please retry.".to_string(),
+            ));
+        }
         Ok(())
     }
 
@@ -241,6 +248,26 @@ impl Database {
     pub fn delete_artist(&self, artist_id: i64) -> CoreResult<()> {
         self.conn
             .execute("DELETE FROM artists WHERE id = ?1", params![artist_id])?;
+        Ok(())
+    }
+
+    pub fn mark_artist_checked_if_ids_match(
+        &self,
+        artist_id: i64,
+        mbid: Option<&str>,
+        deezer_id: Option<i64>,
+    ) -> CoreResult<()> {
+        let now = now_rfc3339_utc();
+        let updated = self.conn.execute(
+            "UPDATE artists SET last_checked_at = ?1, updated_at = ?1
+             WHERE id = ?2 AND mbid IS ?3 AND deezer_id IS ?4",
+            params![now, artist_id, mbid, deezer_id],
+        )?;
+        if updated == 0 {
+            return Err(CoreError::Validation(
+                "Artist provider IDs changed during the check; please retry.".to_string(),
+            ));
+        }
         Ok(())
     }
 

@@ -19,6 +19,23 @@ impl Database {
         &self,
         input: &DiscoveredReleaseInput,
     ) -> CoreResult<(i64, bool, bool)> {
+        self.upsert_discovered_release_inner(input, None)
+    }
+
+    pub(crate) fn upsert_discovered_release_if_ids_match(
+        &self,
+        input: &DiscoveredReleaseInput,
+        mbid: Option<&str>,
+        deezer_id: Option<i64>,
+    ) -> CoreResult<(i64, bool, bool)> {
+        self.upsert_discovered_release_inner(input, Some((mbid, deezer_id)))
+    }
+
+    fn upsert_discovered_release_inner(
+        &self,
+        input: &DiscoveredReleaseInput,
+        expected_ids: Option<(Option<&str>, Option<i64>)>,
+    ) -> CoreResult<(i64, bool, bool)> {
         let norm_title = normalize_release_title(&input.title);
         if norm_title.is_empty() {
             return Err(CoreError::Validation(
@@ -28,6 +45,18 @@ impl Database {
 
         // Serialize the match and update/insert across GUI and CLI connections.
         let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
+        if let Some((mbid, deezer_id)) = expected_ids {
+            let matches: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM artists WHERE id = ?1 AND mbid IS ?2 AND deezer_id IS ?3)",
+                params![input.artist_id, mbid, deezer_id],
+                |r| r.get(0),
+            )?;
+            if !matches {
+                return Err(CoreError::Validation(
+                    "Artist provider IDs changed during the check; please retry.".to_string(),
+                ));
+            }
+        }
 
         // Match existing release by Deezer ID, MusicBrainz Release-Group ID, or (normalized_title, release_type)
         let existing: Option<(i64, String, String, Option<String>)> = tx
