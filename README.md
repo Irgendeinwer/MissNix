@@ -26,10 +26,8 @@
 - **Artist tag cleanup:** Splits collaboration credits into individual artists without breaking names like `Tyler, The Creator`, `Black Country, New Road`, or `AC/DC`. You can also mute or hide any artist in one click.
 - **Release radar:** Shows new, unread, and upcoming releases in a cover grid with search and filters for albums, EPs, and singles.
 - **30-second track previews:** Play track previews from the release drawer or docked mini-player without leaving the app.
-- **Themes and scaling:** Choose dark or light mode, 7 built-in palettes (including Copper), or a custom `#RRGGBB` accent seed, including muted colors. Accent and swatch lightness are adjusted for readability; the settings offer `90%`–`200%` UI scaling.
+- **Themes and scaling:** Choose dark or light mode, 7 built-in palettes, or a custom `#RRGGBB` accent seed. Accent and swatch lightness are adjusted for readability; the settings offer `90%`–`200%` UI scaling.
 - **Headless CLI:** Run scans, check for new drops, emit JSON status output, and send desktop notifications from a terminal or systemd timer.
-
-In smaller windows, the inspector opens over the content instead of squeezing it. Use the menu icon to expand the compact navigation and see task status; close the inspector with **Esc** or by clicking outside it. Very narrow layouts provide scrollbars where content cannot fit.
 
 ---
 
@@ -44,7 +42,7 @@ Click a screenshot to open the original image.
 
 **Tracked Artists**
 
-[![Tracked Artists list with an artist details inspector](assets/docs/screenshots/arists.png)](assets/docs/screenshots/arists.png)
+[![Tracked Artists list with an artist details inspector](assets/docs/screenshots/artists.png)](assets/docs/screenshots/artists.png)
 
 **Library & Preferences**
 
