@@ -10,6 +10,8 @@ pub const MAX_ACCENT_PRESET: u8 = 7;
 /// Custom accent preset index (`7`).
 pub const CUSTOM_ACCENT_PRESET: u8 = 7;
 
+const GRAPHITE_ACCENT_PRESET: u8 = 6;
+
 /// Default custom seed hex when none has been configured yet.
 pub const DEFAULT_CUSTOM_ACCENT_HEX: &str = "#6366F1";
 
@@ -75,13 +77,13 @@ pub fn format_hex_color((r, g, b): (u8, u8, u8)) -> String {
 /// Return the canonical seed RGB color for built-in presets `0..=6`.
 pub fn preset_seed_rgb(preset: u8) -> (u8, u8, u8) {
     match preset {
-        0 => (139, 92, 246),  // Iris Violet   (#8B5CF6)
-        1 => (56, 189, 248),  // Nord Frost    (#38BDF8)
-        2 => (16, 185, 129),  // Emerald Sage  (#10B981)
-        3 => (245, 158, 11),  // Amber Gold    (#F59E0B)
-        4 => (244, 63, 94),   // Coral Rose    (#F43F5E)
-        5 => (234, 108, 52),  // Sunset Copper (#EA6C34)
-        6 => (140, 144, 150), // Graphite Mono (#8C9096)
+        0 => (139, 92, 246),                       // Iris Violet   (#8B5CF6)
+        1 => (56, 189, 248),                       // Nord Frost    (#38BDF8)
+        2 => (16, 185, 129),                       // Emerald Sage  (#10B981)
+        3 => (245, 158, 11),                       // Amber Gold    (#F59E0B)
+        4 => (244, 63, 94),                        // Coral Rose    (#F43F5E)
+        5 => (234, 108, 52),                       // Sunset Copper (#EA6C34)
+        GRAPHITE_ACCENT_PRESET => (140, 144, 150), // Graphite Mono (#8C9096)
         _ => (139, 92, 246),
     }
 }
@@ -98,42 +100,38 @@ pub fn resolve_theme_palette(
     } else {
         preset_seed_rgb(accent_preset)
     };
-    let mut palette = generate_m3_palette(seed, dark_mode);
+    // Graphite is deliberately neutral. Other seeds, including nearly gray custom
+    // colors, retain their own chroma rather than being forced to a minimum.
+    let mut palette = generate_palette(seed, dark_mode, accent_preset == GRAPHITE_ACCENT_PRESET);
     let (_, cs, ch) = rgb_to_oklch(custom_rgb);
-    palette.custom_swatch = if cs < 0.018 {
-        oklch_to_rgb(0.76, 0.0, 0.0)
-    } else {
-        oklch_to_rgb(0.78, cs.clamp(0.11, 0.17), ch)
-    };
+    // Keep the swatch light enough for its dark checkmark, without artificially
+    // increasing saturation or discarding a subtle custom hue.
+    palette.custom_swatch = oklch_to_rgb(0.78, cs.min(0.17), ch);
     palette
 }
 
 /// Generate a perceptually balanced Material 3 tonal palette from any `(R, G, B)` seed.
 pub fn generate_m3_palette(seed_rgb: (u8, u8, u8), dark_mode: bool) -> ThemePalette {
-    let (_l_seed, c_seed, h) = rgb_to_oklch(seed_rgb);
-    let monochrome = c_seed < 0.018;
+    generate_palette(seed_rgb, dark_mode, false)
+}
 
-    // Subtle Material 3 neutral chroma tinted toward the seed hue (zero for Graphite/gray seeds).
-    let nc = if monochrome {
-        0.0
-    } else {
-        (c_seed * 0.115).clamp(0.012, 0.022)
-    };
+fn generate_palette(
+    seed_rgb: (u8, u8, u8),
+    dark_mode: bool,
+    force_monochrome: bool,
+) -> ThemePalette {
+    let (_l_seed, chroma, h) = rgb_to_oklch(seed_rgb);
+    let c_seed = if force_monochrome { 0.0 } else { chroma };
+
+    // Neutral surfaces follow the seed's chroma, capped to keep surfaces subtle.
+    let nc = (c_seed * 0.115).min(0.022);
 
     let seed_hex = format_hex_color(seed_rgb);
     let custom_swatch = [seed_rgb.0, seed_rgb.1, seed_rgb.2];
 
     if dark_mode {
-        let pc = if monochrome {
-            0.0
-        } else {
-            (c_seed * 0.88).clamp(0.095, 0.158)
-        };
-        let sc = if monochrome {
-            0.0
-        } else {
-            (nc * 1.65).min(0.034)
-        };
+        let pc = (c_seed * 0.88).min(0.158);
+        let sc = (nc * 1.65).min(0.034);
 
         ThemePalette {
             seed_hex,
@@ -162,16 +160,8 @@ pub fn generate_m3_palette(seed_rgb: (u8, u8, u8), dark_mode: bool) -> ThemePale
             on_secondary_container: oklch_to_rgb(0.900, sc * 0.85, h),
         }
     } else {
-        let pc = if monochrome {
-            0.0
-        } else {
-            c_seed.clamp(0.105, 0.178)
-        };
-        let sc = if monochrome {
-            0.0
-        } else {
-            (nc * 1.50).min(0.030)
-        };
+        let pc = c_seed.min(0.178);
+        let sc = (nc * 1.50).min(0.030);
 
         ThemePalette {
             seed_hex,
@@ -342,5 +332,138 @@ mod tests {
         assert!(custom_dark.primary[0] > custom_dark.primary[1]);
         assert!(custom_dark.surface[0] < custom_light.surface[0]);
         assert!(custom_dark.on_surface[0] > custom_light.on_surface[0]);
+    }
+
+    fn chroma([r, g, b]: [u8; 3]) -> f32 {
+        rgb_to_oklch((r, g, b)).1
+    }
+
+    fn contrast_ratio(a: [u8; 3], b: [u8; 3]) -> f32 {
+        fn luminance([r, g, b]: [u8; 3]) -> f32 {
+            0.2126 * srgb_to_linear(r) + 0.7152 * srgb_to_linear(g) + 0.0722 * srgb_to_linear(b)
+        }
+        let a = luminance(a);
+        let b = luminance(b);
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    #[test]
+    fn muted_custom_seeds_keep_their_chroma_in_both_modes_and_the_swatch() {
+        for hex in ["#8A8079", "#77868A", "#888885", "#858381"] {
+            let seed = parse_hex_color(hex).unwrap();
+            let (_, seed_chroma, seed_hue) = rgb_to_oklch(seed);
+            assert!((0.002..0.04).contains(&seed_chroma), "{hex}");
+            for dark_mode in [false, true] {
+                let p = resolve_theme_palette(CUSTOM_ACCENT_PRESET, hex, dark_mode);
+                // Allow for 8-bit sRGB quantization, not an artificial saturation floor.
+                for (name, [r, g, b]) in [("primary", p.primary), ("swatch", p.custom_swatch)] {
+                    let (_, actual, hue) = rgb_to_oklch((r, g, b));
+                    assert!(
+                        actual <= seed_chroma + 0.004,
+                        "{hex} dark={dark_mode}: {name} chroma {actual} exceeds seed {seed_chroma}"
+                    );
+                    assert!(
+                        r != g || g != b,
+                        "{hex} dark={dark_mode}: {name} lost its subtle tint"
+                    );
+                    assert!(
+                        (hue - seed_hue).cos() > 0.95,
+                        "{hex} dark={dark_mode}: {name} shifted away from the seed hue"
+                    );
+                }
+                let surface_chroma = chroma(p.surface_container);
+                assert!(
+                    surface_chroma <= seed_chroma * 0.115 + 0.004,
+                    "{hex} dark={dark_mode}: surface chroma {surface_chroma} is too high"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn near_neutral_accents_change_smoothly_across_the_old_gray_threshold() {
+        for dark_mode in [false, true] {
+            let mut previous = resolve_theme_palette(CUSTOM_ACCENT_PRESET, "#808080", dark_mode);
+            let mut crossed_old_threshold = false;
+            for r in 129..=162 {
+                let hex = format!("#{r:02X}8080");
+                crossed_old_threshold |= rgb_to_oklch((r, 128, 128)).1 >= 0.018;
+                let current = resolve_theme_palette(CUSTOM_ACCENT_PRESET, &hex, dark_mode);
+                for (before, after) in [
+                    (previous.primary, current.primary),
+                    (previous.custom_swatch, current.custom_swatch),
+                    (previous.surface_container, current.surface_container),
+                ] {
+                    assert!(
+                        before
+                            .into_iter()
+                            .zip(after)
+                            .all(|(a, b)| a.abs_diff(b) <= 3),
+                        "{hex} dark={dark_mode}: abrupt change from {before:?} to {after:?}"
+                    );
+                }
+                previous = current;
+            }
+            assert!(crossed_old_threshold);
+        }
+    }
+
+    #[test]
+    fn neutral_custom_seeds_and_graphite_stay_neutral() {
+        for dark_mode in [false, true] {
+            for hex in ["#000000", "#808080", "#FFFFFF"] {
+                let p = resolve_theme_palette(CUSTOM_ACCENT_PRESET, hex, dark_mode);
+                for [r, g, b] in [p.surface, p.primary, p.custom_swatch] {
+                    assert_eq!((r, g), (g, b), "{hex} dark={dark_mode}");
+                }
+            }
+            let graphite = resolve_theme_palette(GRAPHITE_ACCENT_PRESET, "#808080", dark_mode);
+            assert_eq!(graphite.seed_hex, "#8C9096");
+            for [r, g, b] in [
+                graphite.surface,
+                graphite.primary,
+                graphite.secondary_container,
+            ] {
+                assert_eq!((r, g), (g, b), "graphite dark={dark_mode}");
+            }
+        }
+    }
+
+    #[test]
+    fn generated_text_and_swatch_keep_readable_contrast() {
+        // Exercise neutral, muted and saturated seeds across the RGB cube. Gamut mapping
+        // must retain contrast while the swatch stays legible with its #141414 checkmark.
+        for r in [0, 51, 102, 153, 204, 255] {
+            for g in [0, 51, 102, 153, 204, 255] {
+                for b in [0, 51, 102, 153, 204, 255] {
+                    let hex = format!("#{r:02X}{g:02X}{b:02X}");
+                    for dark_mode in [false, true] {
+                        let p = resolve_theme_palette(CUSTOM_ACCENT_PRESET, &hex, dark_mode);
+                        for (name, foreground, background) in [
+                            ("surface", p.on_surface, p.surface),
+                            ("surface variant", p.on_surface_variant, p.surface),
+                            ("primary", p.on_primary, p.primary),
+                            (
+                                "primary container",
+                                p.on_primary_container,
+                                p.primary_container,
+                            ),
+                            (
+                                "secondary container",
+                                p.on_secondary_container,
+                                p.secondary_container,
+                            ),
+                            ("swatch checkmark", [20, 20, 20], p.custom_swatch),
+                        ] {
+                            let contrast = contrast_ratio(foreground, background);
+                            assert!(
+                                contrast >= 4.5,
+                                "{hex} dark={dark_mode}: {name} contrast {contrast:.2}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 }
