@@ -33,6 +33,27 @@ In smaller windows, the inspector opens over the content instead of squeezing it
 
 ---
 
+## Screenshots
+
+Click a screenshot to open the original image.
+
+[![Release Radar with its cover grid and release details inspector](assets/docs/screenshots/radar.png)](assets/docs/screenshots/radar.png)
+
+<details>
+<summary>More screenshots: Artists and Settings</summary>
+
+**Tracked Artists**
+
+[![Tracked Artists list with an artist details inspector](assets/docs/screenshots/arists.png)](assets/docs/screenshots/arists.png)
+
+**Library & Preferences**
+
+[![Library and Preferences settings for appearance and artist discovery](assets/docs/screenshots/settings.png)](assets/docs/screenshots/settings.png)
+
+</details>
+
+---
+
 ## Install & Run
 
 ### Prebuilt Linux Downloads
