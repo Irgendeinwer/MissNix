@@ -8,11 +8,21 @@ export component NavRailItem inherits Rectangle {
     in property <image> icon;
     in property <int> badge-count: 0;
     in property <bool> active: false;
+    out property <bool> has-focus <=> keyboard-focus.has-focus;
     callback clicked();
+    property <bool> key-down: false;
+
+    forward-focus: keyboard-focus;
+    changed has-focus => { if (!root.has-focus) { root.key-down = false; } }
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
 
     height: 42px;
     vertical-stretch: 0;
     border-radius: 21px;
+    border-width: root.has-focus ? 2px : 0px;
+    border-color: Theme.primary;
     background: root.active
         ? Theme.primary-container
         : (touch.has-hover ? Theme.on-surface.with-alpha(0.06) : transparent);
@@ -61,9 +71,31 @@ export component NavRailItem inherits Rectangle {
         }
     }
 
+    keyboard-focus := FocusScope {
+        x: 0px;
+        width: 0px;
+        key-pressed(event) => {
+            if ((event.text == " " || event.text == "\n") && !root.key-down) {
+                root.key-down = true;
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+        key-released(event) => {
+            if (event.text == " " || event.text == "\n") {
+                root.key-down = false;
+                return accept;
+            }
+            reject
+        }
+    }
     touch := TouchArea {
         mouse-cursor: pointer;
-        clicked => { root.clicked(); }
+        clicked => {
+            keyboard-focus.focus();
+            root.clicked();
+        }
     }
 }
 
@@ -72,12 +104,14 @@ export component SectionCard inherits Rectangle {
     in property <string> subtitle: "";
 
     vertical-stretch: 0;
+    min-width: 0px;
     border-radius: 16px;
     background: Theme.surface-container;
     border-width: 1px;
     border-color: Theme.outline-variant;
 
     VerticalLayout {
+        min-width: 0px;
         padding: 20px;
         spacing: 14px;
         alignment: start;
@@ -90,6 +124,7 @@ export component SectionCard inherits Rectangle {
                 font-size: 15px;
                 font-weight: 700;
                 color: Theme.on-surface;
+                wrap: word-wrap;
             }
             if root.subtitle != "" : Text {
                 text: root.subtitle;
@@ -308,6 +343,41 @@ export component M3Select inherits Rectangle {
                 }
             }
         }
+    }
+}
+
+// Labels stack above the unchanged dropdown when there is not enough room
+// for both at their natural widths.
+export component M3LabeledSelect inherits Rectangle {
+    in property <string> label;
+    in property <[string]> model;
+    in-out property <int> current-index;
+    in property <length> select-width: 290px;
+    callback selected(string);
+
+    property <bool> stacked: root.width < 204px + root.select-width;
+    min-width: 0px;
+    height: root.stacked ? 62px : 36px;
+    vertical-stretch: 0;
+
+    Text {
+        x: 0px;
+        y: 0px;
+        width: root.stacked ? root.width : 190px;
+        height: root.stacked ? 20px : 36px;
+        text: root.label;
+        font-size: 12.5px;
+        font-weight: 600;
+        color: Theme.on-surface;
+        vertical-alignment: center;
+    }
+    M3Select {
+        x: root.stacked ? 0px : 204px;
+        y: root.stacked ? 26px : 0px;
+        width: min(root.select-width, max(0px, root.width - self.x));
+        model: root.model;
+        current-index <=> root.current-index;
+        selected(value) => { root.selected(value); }
     }
 }
 

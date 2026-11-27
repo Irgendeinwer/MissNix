@@ -6,5 +6,6 @@
 *.db-wal
 *.db-shm
 /dist
+/tests/ui/node_modules/
 /log.txt
 Unselected files/

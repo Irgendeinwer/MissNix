@@ -175,6 +175,7 @@ export component ArtistListRow inherits Rectangle {
                     icon: root.artist.status == "muted"
                         ? @image-url("../../assets/icons/volume-off.svg")
                         : @image-url("../../assets/icons/volume-on.svg");
+                    accessible-name: root.artist.status == "muted" ? "Unmute artist" : "Mute artist";
                     clicked => { root.toggle-mute(root.artist.id); }
                 }
 
@@ -186,6 +187,8 @@ export component ArtistListRow inherits Rectangle {
                     icon: root.artist.status == "missing"
                         ? @image-url("../../assets/icons/plus.svg")
                         : @image-url("../../assets/icons/eye-off.svg");
+                    accessible-name: root.artist.status == "missing" ? "Track artist"
+                        : root.artist.status == "ignored" ? "Restore artist" : "Hide artist";
                     clicked => { root.toggle-ignore(root.artist.id); }
                 }
             }
@@ -200,23 +203,29 @@ export component SearchCandidateRow inherits Rectangle {
     in property <SearchCandidateRowData> candidate;
     callback add-candidate(int);
 
-    height: 48px;
+    // Give the result text and its Track action separate rows before either
+    // has to be squeezed. Exceptionally narrow results stack the badge too.
+    property <bool> stacked: root.width < badge.width + track-button.width + 150px;
+    property <bool> buttons-stacked: root.width < badge.width + track-button.width + 34px;
+    height: root.buttons-stacked ? 120px : root.stacked ? 86px : 48px;
+    min-width: 0px;
     vertical-stretch: 0;
     border-radius: 10px;
     background: Theme.surface-container-low;
     border-width: 1px;
     border-color: Theme.outline-variant;
 
-    HorizontalLayout {
-        padding-left: 12px;
-        padding-right: 10px;
-        spacing: 10px;
-
+    Rectangle {
+        x: 12px;
+        y: root.stacked ? 5px : 0px;
+        width: root.stacked ? max(0px, root.width - 24px)
+            : max(0px, badge.x - self.x - 10px);
+        height: root.stacked ? 40px : 48px;
+        clip: true;
         VerticalLayout {
             alignment: center;
-            horizontal-stretch: 1;
             spacing: 2px;
-
+            min-width: 0px;
             Text {
                 text: root.candidate.name;
                 font-size: 13px;
@@ -231,21 +240,24 @@ export component SearchCandidateRow inherits Rectangle {
                 overflow: elide;
             }
         }
+    }
 
-        TonalBadge {
-            y: (parent.height - self.height) / 2;
-            label: root.candidate.source-badge;
-        }
+    badge := TonalBadge {
+        x: root.stacked ? 12px : max(12px, track-button.x - self.width - 10px);
+        y: root.stacked ? 51px : (root.height - self.height) / 2;
+        label: root.candidate.source-badge;
+    }
 
-        M3Button {
-            y: (parent.height - self.height) / 2;
-            compact: true;
-            variant: "filled";
-            has-icon: true;
-            icon: @image-url("../../assets/icons/plus.svg");
-            text: "Track";
-            clicked => { root.add-candidate(root.candidate.index); }
-        }
+    track-button := M3Button {
+        x: root.buttons-stacked ? 12px : max(0px, root.width - self.width - 10px);
+        y: root.buttons-stacked ? 80px : root.stacked ? 45px : (root.height - self.height) / 2;
+        width: self.preferred-width;
+        compact: true;
+        variant: "filled";
+        has-icon: true;
+        icon: @image-url("../../assets/icons/plus.svg");
+        text: "Track";
+        clicked => { root.add-candidate(root.candidate.index); }
     }
 }
 

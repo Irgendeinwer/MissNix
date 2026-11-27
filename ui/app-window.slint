@@ -27,8 +27,10 @@ export {
 
 export component AppWindow inherits Window {
     title: "MissNix — Local Music Release Radar";
-    min-width: 820px;
-    min-height: 540px;
+    // The shell can reflow into an overlay inspector and compact navigation.
+    // A compositor can still give us less logical space after a scale change.
+    min-width: 480px;
+    min-height: 400px;
     preferred-width: 1400px;
     preferred-height: 880px;
     background: Theme.surface;
@@ -90,6 +92,30 @@ export component AppWindow inherits Window {
 
     // Unified Right Inspector Mode: 0 = Closed, 1 = Release Details, 2 = Artist Details
     in-out property <int> inspector-mode: 0;
+
+    // Keep at least 700 logical pixels for the main view before docking a
+    // 404px inspector beside the 244px rail. Below that it overlays instead.
+    property <bool> overlay-inspector: root.width < 1348px;
+    property <bool> compact-navigation: root.width < 980px;
+    property <bool> navigation-expanded: false;
+    property <length> navigation-width: root.compact-navigation ? 72px : 244px;
+
+    changed compact-navigation => {
+        if (!root.compact-navigation) { root.navigation-expanded = false; }
+    }
+    // Closing a panel can remove the focused control. Restore a live focus
+    // target so Escape and the global shortcuts continue to work afterwards.
+    changed navigation-expanded => { key-scope.focus(); }
+    changed is-busy => {
+        if (!root.is-busy && nav.cancel-has-focus) { key-scope.focus(); }
+    }
+    changed show-add-artist-bar => {
+        if (!root.show-add-artist-bar) { key-scope.focus(); }
+    }
+    changed inspector-mode => {
+        if (root.inspector-mode != 0) { root.navigation-expanded = false; }
+        key-scope.focus();
+    }
 
     // Selected Release Inspector State
     in property <int> selected-release-id: 0;
@@ -208,6 +234,10 @@ export component AppWindow inherits Window {
                     root.close-inspector();
                     return accept;
                 }
+                if (root.navigation-expanded) {
+                    root.navigation-expanded = false;
+                    return accept;
+                }
                 if (root.show-add-artist-bar) {
                     root.show-add-artist-bar = false;
                     return accept;
@@ -247,35 +277,28 @@ export component AppWindow inherits Window {
         }
 
         HorizontalLayout {
+            x: 0px;
+            y: 0px;
             width: 100%;
             height: 100%;
 
-            // =====================================================================
-            NavRail {
-                active-view <=> root.active-view;
-                busy-label: root.busy-label;
-                cancel-background-task => { root.cancel-background-task(); }
-                check-all-releases => { root.check-all-releases(); }
-                is-busy: root.is-busy;
-                library-summary-text: root.library-summary-text;
-                navigate(a0) => { root.navigate(a0); }
-                progress-fraction: root.progress-fraction;
-                progress-indeterminate: root.progress-indeterminate;
-                scan-library => { root.scan-library(); }
-                status-banner-text: root.status-banner-text;
-                status-is-warning: root.status-is-warning;
-                unseen-badge-count: root.unseen-badge-count;
+            // The rail itself is layered above the shell so it can expand over
+            // the content without resizing it on narrow windows.
+            Rectangle {
+                width: root.navigation-width;
+                horizontal-stretch: 0;
             }
 
             VerticalLayout {
-                // Let the center yield space to the full-width inspector even
-                // when the toolbar's preferred width exceeds the window.
+                // Only a docked inspector reserves space. An overlay leaves
+                // the main view and its controls at their full usable width.
                 horizontal-stretch: 1;
                 min-width: 0px;
                 height: 100%;
 
                 Rectangle {
                     vertical-stretch: 1;
+                    min-height: 0px;
                     background: Theme.surface;
                     clip: true;
 
@@ -402,40 +425,94 @@ export component AppWindow inherits Window {
                 }
             }
 
-            InspectorDrawer {
-                active-view <=> root.active-view;
-                check-single-artist(a0) => { root.check-single-artist(a0); }
-                close-inspector => { root.close-inspector(); }
-                delete-artist(a0) => { root.delete-artist(a0); }
-                dismiss-release(a0) => { root.dismiss-release(a0); }
-                edit-artist-deezer-id <=> root.edit-artist-deezer-id;
-                edit-artist-mbid <=> root.edit-artist-mbid;
-                inspect-artist(a0) => { root.inspect-artist(a0); }
-                inspector-mode <=> root.inspector-mode;
-                is-busy: root.is-busy;
-                loading-tracks: root.loading-tracks;
-                open-external-url(a0) => { root.open-external-url(a0); }
-                play-track-preview(a0, a1, a2) => { root.play-track-preview(a0, a1, a2); }
-                preview-active: root.preview-active;
-                preview-buffering: root.preview-buffering;
-                preview-disc-number: root.preview-disc-number;
-                preview-level: root.preview-level;
-                preview-playing: root.preview-playing;
-                preview-release-id: root.preview-release-id;
-                preview-track-number: root.preview-track-number;
-                save-artist-provider-ids(a0, a1, a2) => { root.save-artist-provider-ids(a0, a1, a2); }
-                selected-artist: root.selected-artist;
-                selected-artist-id: root.selected-artist-id;
-                selected-artist-local-albums: root.selected-artist-local-albums;
-                selected-release: root.selected-release;
-                selected-release-artist-status: root.selected-release-artist-status;
-                selected-release-id: root.selected-release-id;
-                selected-release-tracks: root.selected-release-tracks;
-                toggle-artist-ignore(a0) => { root.toggle-artist-ignore(a0); }
-                toggle-artist-mute(a0) => { root.toggle-artist-mute(a0); }
-                toggle-release-seen(a0) => { root.toggle-release-seen(a0); }
-                view-artist-releases(a0) => { root.view-artist-releases(a0); }
+            Rectangle {
+                width: !root.overlay-inspector && drawer.drawer-open ? 404px : 0px;
+                horizontal-stretch: 0;
             }
+        }
+
+        // Expanded navigation temporarily covers the content in compact mode.
+        if root.compact-navigation && root.navigation-expanded : Rectangle {
+            x: root.navigation-width;
+            width: max(0px, parent.width - self.x);
+            height: 100%;
+            background: #000000.with-alpha(0.35);
+            TouchArea { clicked => { root.navigation-expanded = false; } }
+        }
+
+        nav := NavRail {
+            x: 0px;
+            y: 0px;
+            width: root.compact-navigation && !root.navigation-expanded ? 72px : 244px;
+            height: 100%;
+            compact: root.compact-navigation && !root.navigation-expanded;
+            collapsible: root.compact-navigation;
+            expand-navigation => { root.navigation-expanded = true; }
+            collapse-navigation => { root.navigation-expanded = false; }
+            active-view <=> root.active-view;
+            busy-label: root.busy-label;
+            cancel-background-task => { root.cancel-background-task(); }
+            check-all-releases => { root.check-all-releases(); }
+            is-busy: root.is-busy;
+            library-summary-text: root.library-summary-text;
+            navigate(a0) => {
+                root.navigation-expanded = false;
+                root.navigate(a0);
+            }
+            progress-fraction: root.progress-fraction;
+            progress-indeterminate: root.progress-indeterminate;
+            scan-library => { root.scan-library(); }
+            status-banner-text: root.status-banner-text;
+            status-is-warning: root.status-is-warning;
+            unseen-badge-count: root.unseen-badge-count;
+        }
+
+        // Dismiss an overlay by clicking outside it. The docked inspector has
+        // no scrim, so its neighboring grid remains directly interactive.
+        if root.overlay-inspector && drawer.drawer-open : Rectangle {
+            width: 100%;
+            height: 100%;
+            background: #000000.with-alpha(0.35);
+            TouchArea { clicked => { root.close-inspector(); } }
+        }
+
+        drawer := InspectorDrawer {
+            x: max(0px, parent.width - self.width);
+            y: 0px;
+            height: 100%;
+            available-width: root.width;
+            active-view <=> root.active-view;
+            check-single-artist(a0) => { root.check-single-artist(a0); }
+            close-inspector => { root.close-inspector(); }
+            delete-artist(a0) => { root.delete-artist(a0); }
+            dismiss-release(a0) => { root.dismiss-release(a0); }
+            edit-artist-deezer-id <=> root.edit-artist-deezer-id;
+            edit-artist-mbid <=> root.edit-artist-mbid;
+            inspect-artist(a0) => { root.inspect-artist(a0); }
+            inspector-mode <=> root.inspector-mode;
+            is-busy: root.is-busy;
+            loading-tracks: root.loading-tracks;
+            open-external-url(a0) => { root.open-external-url(a0); }
+            play-track-preview(a0, a1, a2) => { root.play-track-preview(a0, a1, a2); }
+            preview-active: root.preview-active;
+            preview-buffering: root.preview-buffering;
+            preview-disc-number: root.preview-disc-number;
+            preview-level: root.preview-level;
+            preview-playing: root.preview-playing;
+            preview-release-id: root.preview-release-id;
+            preview-track-number: root.preview-track-number;
+            save-artist-provider-ids(a0, a1, a2) => { root.save-artist-provider-ids(a0, a1, a2); }
+            selected-artist: root.selected-artist;
+            selected-artist-id: root.selected-artist-id;
+            selected-artist-local-albums: root.selected-artist-local-albums;
+            selected-release: root.selected-release;
+            selected-release-artist-status: root.selected-release-artist-status;
+            selected-release-id: root.selected-release-id;
+            selected-release-tracks: root.selected-release-tracks;
+            toggle-artist-ignore(a0) => { root.toggle-artist-ignore(a0); }
+            toggle-artist-mute(a0) => { root.toggle-artist-mute(a0); }
+            toggle-release-seen(a0) => { root.toggle-release-seen(a0); }
+            view-artist-releases(a0) => { root.view-artist-releases(a0); }
         }
     }
 }

@@ -29,6 +29,8 @@
 - **Themes and scaling:** Choose dark or light mode, 7 built-in palettes (including Copper), or a custom `#RRGGBB` accent seed, including muted colors. Accent and swatch lightness are adjusted for readability; the settings offer `90%`–`200%` UI scaling.
 - **Headless CLI:** Run scans, check for new drops, emit JSON status output, and send desktop notifications from a terminal or systemd timer.
 
+In smaller windows, the inspector opens over the content instead of squeezing it. Use the menu icon to expand the compact navigation and see task status; close the inspector with **Esc** or by clicking outside it. Very narrow layouts provide scrollbars where content cannot fit.
+
 ---
 
 ## Install & Run
@@ -127,7 +129,7 @@ missnix [OPTIONS]
 | :--- | :--- |
 | `/` | Focus the search bar in Release Radar or Tracked Artists |
 | `Space` | Play or pause the active 30-second track preview |
-| `Esc` | Close the right inspector drawer or Add Artist bar |
+| `Esc` | Close the inspector, expanded navigation, or Add Artist bar |
 | `Ctrl + R` | Check all tracked artists for new releases |
 | `Ctrl + =` / `Ctrl + -` | Increase or decrease interface scale |
 | `Ctrl + 0` | Reset interface scale to `100%` |

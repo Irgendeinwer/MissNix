@@ -98,7 +98,16 @@ export component M3Button inherits Rectangle {
     in property <bool> enabled: true;
     in property <bool> compact: false;
     in property <bool> fill-width: false;
+    out property <bool> has-focus <=> keyboard-focus.has-focus;
     callback clicked();
+    property <bool> key-down: false;
+
+    forward-focus: keyboard-focus;
+    changed has-focus => { if (!root.has-focus) { root.key-down = false; } }
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
 
     property <color> base-bg: root.variant == "filled" ? Theme.primary
                             : root.variant == "primary-tonal" ? Theme.primary-container
@@ -125,8 +134,8 @@ export component M3Button inherits Rectangle {
               : touch.has-hover ? (root.variant == "outlined" ? Theme.on-surface.with-alpha(0.07) : root.base-bg.brighter(0.09))
               : root.base-bg;
 
-    border-width: root.variant == "outlined" ? 1px : 0px;
-    border-color: touch.has-hover ? Theme.primary.with-alpha(0.65) : Theme.outline;
+    border-width: root.has-focus ? 2px : root.variant == "outlined" ? 1px : 0px;
+    border-color: root.has-focus ? Theme.primary : touch.has-hover ? Theme.primary.with-alpha(0.65) : Theme.outline;
 
     animate background { duration: 115ms; easing: ease-out; }
     animate border-color { duration: 115ms; easing: ease-out; }
@@ -157,10 +166,33 @@ export component M3Button inherits Rectangle {
         }
     }
 
+    keyboard-focus := FocusScope {
+        x: 0px;
+        width: 0px;
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if ((event.text == " " || event.text == "\n") && !root.key-down) {
+                root.key-down = true;
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+        key-released(event) => {
+            if (event.text == " " || event.text == "\n") {
+                root.key-down = false;
+                return accept;
+            }
+            reject
+        }
+    }
     touch := TouchArea {
         enabled: root.enabled;
         mouse-cursor: root.enabled ? pointer : default;
-        clicked => { root.clicked(); }
+        clicked => {
+            keyboard-focus.focus();
+            root.clicked();
+        }
     }
 }
 
@@ -175,7 +207,18 @@ export component M3IconButton inherits Rectangle {
     in property <bool> filled-primary: false;
     in property <bool> danger: false;
     in property <bool> enabled: true;
+    // Icon-only controls can supply a name for screen readers.
+    in property <string> accessible-name: "";
+    out property <bool> has-focus <=> keyboard-focus.has-focus;
     callback clicked();
+    property <bool> key-down: false;
+
+    forward-focus: keyboard-focus;
+    changed has-focus => { if (!root.has-focus) { root.key-down = false; } }
+    accessible-role: button;
+    accessible-label: root.accessible-name;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
 
     width: root.size;
     height: root.size;
@@ -197,8 +240,8 @@ export component M3IconButton inherits Rectangle {
                 ? (touch.has-hover ? Theme.primary-container.brighter(0.08) : Theme.primary-container)
                 : (touch.pressed ? Theme.on-surface.with-alpha(0.14) : touch.has-hover ? Theme.on-surface.with-alpha(0.08) : transparent);
 
-    border-width: root.active && !root.filled-primary ? 1px : 0px;
-    border-color: root.danger ? Theme.error.with-alpha(0.45) : Theme.primary.with-alpha(0.45);
+    border-width: root.has-focus ? 2px : root.active && !root.filled-primary ? 1px : 0px;
+    border-color: root.danger ? Theme.error.with-alpha(0.65) : Theme.primary.with-alpha(root.has-focus ? 1.0 : 0.45);
 
     animate background { duration: 115ms; easing: ease-out; }
 
@@ -212,10 +255,33 @@ export component M3IconButton inherits Rectangle {
         image-fit: ImageFit.contain;
     }
 
+    keyboard-focus := FocusScope {
+        x: 0px;
+        width: 0px;
+        enabled: root.enabled;
+        key-pressed(event) => {
+            if ((event.text == " " || event.text == "\n") && !root.key-down) {
+                root.key-down = true;
+                root.clicked();
+                return accept;
+            }
+            reject
+        }
+        key-released(event) => {
+            if (event.text == " " || event.text == "\n") {
+                root.key-down = false;
+                return accept;
+            }
+            reject
+        }
+    }
     touch := TouchArea {
         enabled: root.enabled;
         mouse-cursor: root.enabled ? pointer : default;
-        clicked => { root.clicked(); }
+        clicked => {
+            keyboard-focus.focus();
+            root.clicked();
+        }
     }
 }
 
@@ -344,9 +410,11 @@ export component M3SearchField inherits Rectangle {
             icon-size: 13px;
             y: (parent.height - self.height) / 2;
             icon: @image-url("../../assets/icons/close.svg");
+            accessible-name: "Clear search";
             clicked => {
                 root.text = "";
                 root.edited();
+                inner.focus();
             }
         }
     }
@@ -422,9 +490,11 @@ export component M3LabeledInput inherits VerticalLayout {
                 icon-size: 13px;
                 y: (parent.height - self.height) / 2;
                 icon: @image-url("../../assets/icons/close.svg");
+                accessible-name: "Clear input";
                 clicked => {
                     root.text = "";
                     root.edited();
+                    field-input.focus();
                 }
             }
         }
@@ -488,5 +558,106 @@ export component AccentSwatch inherits Rectangle {
     TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
+    }
+}
+
+// Fixed-size options flow to another row instead of getting compressed or
+// clipped. This is used for settings whose options must remain readable.
+export component M3ChipGrid inherits Rectangle {
+    in property <[string]> labels;
+    in property <[bool]> selections;
+    in property <length> item-width: 96px;
+    // Measure the longest label with a checkmark so fonts wider than the
+    // bundled defaults do not spill past the edge of a fixed-size chip.
+    in property <string> widest-label: "";
+    callback activated(int);
+
+    property <length> gap: 8px;
+    out property <length> cell-width: max(root.item-width, measure-chip.width);
+    property <int> columns: max(1, min(root.labels.length,
+        Math.floor((root.width + root.gap) / (root.cell-width + root.gap))));
+    property <int> rows: Math.ceil(root.labels.length / root.columns);
+    min-width: 0px;
+    height: root.rows * 32px + max(0, root.rows - 1) * root.gap;
+    vertical-stretch: 0;
+
+    measure-chip := M3FilterChip {
+        x: 0px;
+        y: 0px;
+        visible: false;
+        label: root.widest-label;
+        selected: true;
+    }
+    for label[idx] in root.labels : M3FilterChip {
+        x: Math.mod(idx, root.columns) * (root.cell-width + root.gap);
+        y: Math.floor(idx / root.columns) * (32px + root.gap);
+        width: min(root.cell-width, root.width);
+        label: label;
+        selected: root.selections[idx];
+        clicked => { root.activated(idx); }
+    }
+}
+
+export component M3LabeledChipGrid inherits Rectangle {
+    in property <string> label;
+    in property <[string]> labels;
+    in property <[bool]> selections;
+    in property <length> item-width: 96px;
+    in property <string> widest-label: "";
+    callback activated(int);
+
+    property <bool> stacked: root.width < 200px
+        + root.labels.length * chips.cell-width + max(0, root.labels.length - 1) * 8px;
+    min-width: 0px;
+    height: chips.height + (root.stacked ? 26px : 0px);
+    vertical-stretch: 0;
+
+    Text {
+        x: 0px;
+        y: 0px;
+        width: root.stacked ? root.width : 190px;
+        height: root.stacked ? 20px : 32px;
+        text: root.label;
+        font-size: 12.5px;
+        font-weight: 600;
+        color: Theme.on-surface;
+        vertical-alignment: center;
+    }
+    chips := M3ChipGrid {
+        x: root.stacked ? 0px : 200px;
+        y: root.stacked ? 26px : 0px;
+        width: max(0px, root.width - self.x);
+        labels: root.labels;
+        selections: root.selections;
+        item-width: root.item-width;
+        widest-label: root.widest-label;
+        activated(index) => { root.activated(index); }
+    }
+}
+
+export component AccentSwatchGrid inherits Rectangle {
+    in property <int> selected-index;
+    in property <color> custom-color;
+    callback selected(int);
+
+    property <[string]> labels: ["Iris", "Frost", "Emerald", "Amber", "Coral", "Copper", "Graphite", "Custom"];
+    property <[color]> colors: [#c6b8ff, #76d0ff, #6ddeac, #fdb354, #ffa9ad, #ffad8d, #c4c4c4, root.custom-color];
+    property <length> item-width: 110px;
+    property <length> gap: 8px;
+    // At most four across preserves the desktop's two-row palette.
+    property <int> columns: max(1, min(4, Math.floor((root.width + root.gap) / (root.item-width + root.gap))));
+    property <int> rows: Math.ceil(root.labels.length / root.columns);
+    min-width: 0px;
+    height: root.rows * 36px + max(0, root.rows - 1) * root.gap;
+    vertical-stretch: 0;
+
+    for label[idx] in root.labels : AccentSwatch {
+        x: Math.mod(idx, root.columns) * (root.item-width + root.gap);
+        y: Math.floor(idx / root.columns) * (36px + root.gap);
+        width: min(root.item-width, root.width);
+        label: label;
+        swatch-color: root.colors[idx];
+        selected: root.selected-index == idx;
+        clicked => { root.selected(idx); }
     }
 }

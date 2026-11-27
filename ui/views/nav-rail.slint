@@ -1,18 +1,26 @@
+import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import {
     M3Button,
+    M3IconButton,
     M3ProgressBar,
+    M3ScrollBar,
     M3Spinner,
     MissNixLogo,
     NavRailItem,
 } from "../components.slint";
 
 export component NavRail inherits Rectangle {
+    in property <bool> compact: false;
+    in property <bool> collapsible: false;
+    callback expand-navigation();
+    callback collapse-navigation();
     in-out property <int> active-view;
     in property <string> busy-label;
     callback cancel-background-task();
     callback check-all-releases();
     in property <bool> is-busy;
+    out property <bool> cancel-has-focus: false;
     in property <string> library-summary-text;
     callback navigate(int);
     in property <float> progress-fraction;
@@ -22,189 +30,368 @@ export component NavRail inherits Rectangle {
     in property <bool> status-is-warning;
     in property <int> unseen-badge-count;
 
-    width: 244px;
+    width: root.compact ? 72px : 244px;
     horizontal-stretch: 0;
     background: Theme.surface-rail;
+    clip: true;
 
-    VerticalLayout {
-        padding: 14px;
-        spacing: 12px;
+    // The complete rail remains scrollable in a short window, including
+    // background-task progress and its Cancel action.
+    if !root.compact : Rectangle {
+        width: 100%;
+        height: 100%;
 
-        // Brand Header with Dynamic SVG Radar Logo
-        HorizontalLayout {
-            padding-left: 4px;
-            padding-top: 2px;
-            padding-bottom: 6px;
-            spacing: 11px;
+        rail-scroll := ScrollView {
+            width: 100%;
+            height: 100%;
+            vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+            horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+            content-width: self.visible-width;
+            content-height: max(self.visible-height, rail-content.preferred-height);
 
-            MissNixLogo {
-                y: (parent.height - self.height) / 2;
-                scanning: root.is-busy;
-            }
+            rail-content := VerticalLayout {
+                width: rail-scroll.visible-width;
+                height: max(rail-scroll.visible-height, self.preferred-height);
+                padding: 14px;
+                spacing: 12px;
 
-            VerticalLayout {
-                alignment: center;
-                spacing: 1px;
-                Text {
-                    text: "MissNix";
-                    font-size: 17px;
-                    font-weight: 800;
-                    color: Theme.on-surface;
-                }
-                Text {
-                    text: "Release Radar";
-                    font-size: 11px;
-                    color: Theme.on-surface-muted;
-                }
-            }
-        }
+                // Brand Header with Dynamic SVG Radar Logo
+                HorizontalLayout {
+                    padding-left: 4px;
+                    padding-top: 2px;
+                    padding-bottom: 6px;
+                    spacing: 11px;
 
-        // Primary Navigation Destinations with Animated Sliding Pill
-        Rectangle {
-            height: 3 * 42px + 2 * 4px;
-            vertical-stretch: 0;
+                    MissNixLogo {
+                        y: (parent.height - self.height) / 2;
+                        scanning: root.is-busy;
+                    }
 
-            Rectangle {
-                x: 2px;
-                y: root.active-view * 46px + 11px;
-                width: 3px;
-                height: 20px;
-                border-radius: 1.5px;
-                background: Theme.primary;
-
-                animate y { duration: 190ms; easing: cubic-bezier(0.2, 0.0, 0.0, 1.0); }
-            }
-
-            VerticalLayout {
-                spacing: 4px;
-
-                NavRailItem {
-                    icon: @image-url("../../assets/icons/radar.svg");
-                    label: "Release Radar";
-                    badge-count: root.unseen-badge-count;
-                    active: root.active-view == 0;
-                    clicked => { root.navigate(0); }
-                }
-
-                NavRailItem {
-                    icon: @image-url("../../assets/icons/artists.svg");
-                    label: "Tracked Artists";
-                    active: root.active-view == 1;
-                    clicked => { root.navigate(1); }
-                }
-
-                NavRailItem {
-                    icon: @image-url("../../assets/icons/settings.svg");
-                    label: "Library & Settings";
-                    active: root.active-view == 2;
-                    clicked => { root.navigate(2); }
-                }
-            }
-        }
-
-        // Spacer pushes sync actions & telemetry cleanly to bottom
-        Rectangle { vertical-stretch: 1; }
-
-        // Bounded Primary Sync & Scan Actions
-        VerticalLayout {
-            spacing: 8px;
-            vertical-stretch: 0;
-
-            M3Button {
-                fill-width: true;
-                variant: "filled";
-                has-icon: true;
-                icon: @image-url("../../assets/icons/refresh.svg");
-                text: "Check Releases";
-                enabled: !root.is-busy;
-                clicked => { root.check-all-releases(); }
-            }
-
-            M3Button {
-                fill-width: true;
-                variant: "tonal";
-                has-icon: true;
-                icon: @image-url("../../assets/icons/folder.svg");
-                text: "Scan Music Folders";
-                enabled: !root.is-busy;
-                clicked => { root.scan-library(); }
-            }
-        }
-
-        // Non-blocking Background Status & Telemetry Card
-        Rectangle {
-            vertical-stretch: 0;
-            border-radius: 12px;
-            background: Theme.surface-container;
-            border-width: 1px;
-            border-color: root.status-is-warning
-                ? Theme.error.with-alpha(0.55)
-                : Theme.outline-variant;
-
-            VerticalLayout {
-                padding: 11px;
-                spacing: 8px;
-                alignment: start;
-
-                if root.is-busy : VerticalLayout {
-                    spacing: 8px;
-                    alignment: start;
-
-                    HorizontalLayout {
-                        spacing: 8px;
-                        M3Spinner {
-                            width: 16px;
-                            height: 16px;
-                            y: (parent.height - self.height) / 2;
-                            indeterminate: true;
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 1px;
+                        Text {
+                            text: "MissNix";
+                            font-size: 17px;
+                            font-weight: 800;
+                            color: Theme.on-surface;
                         }
                         Text {
-                            text: root.busy-label;
+                            text: "Release Radar";
                             font-size: 11px;
-                            font-weight: 600;
-                            color: Theme.on-surface;
-                            vertical-alignment: center;
-                            horizontal-stretch: 1;
-                            wrap: word-wrap;
+                            color: Theme.on-surface-muted;
                         }
                     }
 
-                    M3ProgressBar {
-                        height: 5px;
-                        indeterminate: root.progress-indeterminate;
-                        progress: root.progress-fraction;
+                    if root.collapsible : M3IconButton {
+                        size: 32px;
+                        icon-size: 15px;
+                        y: (parent.height - self.height) / 2;
+                        icon: @image-url("../../assets/icons/close.svg");
+                        accessible-name: "Close navigation";
+                        clicked => { root.collapse-navigation(); }
+                    }
+                }
+
+                // Primary Navigation Destinations with Animated Sliding Pill
+                Rectangle {
+                    height: 3 * 42px + 2 * 4px;
+                    vertical-stretch: 0;
+
+                    Rectangle {
+                        x: 2px;
+                        y: root.active-view * 46px + 11px;
+                        width: 3px;
+                        height: 20px;
+                        border-radius: 1.5px;
+                        background: Theme.primary;
+
+                        animate y { duration: 190ms; easing: cubic-bezier(0.2, 0.0, 0.0, 1.0); }
+                    }
+
+                    VerticalLayout {
+                        spacing: 4px;
+
+                        NavRailItem {
+                            icon: @image-url("../../assets/icons/radar.svg");
+                            label: "Release Radar";
+                            badge-count: root.unseen-badge-count;
+                            active: root.active-view == 0;
+                            clicked => { root.navigate(0); }
+                        }
+
+                        NavRailItem {
+                            icon: @image-url("../../assets/icons/artists.svg");
+                            label: "Tracked Artists";
+                            active: root.active-view == 1;
+                            clicked => { root.navigate(1); }
+                        }
+
+                        NavRailItem {
+                            icon: @image-url("../../assets/icons/settings.svg");
+                            label: "Library & Settings";
+                            active: root.active-view == 2;
+                            clicked => { root.navigate(2); }
+                        }
+                    }
+                }
+
+                // Spacer pushes sync actions & telemetry cleanly to bottom
+                Rectangle { vertical-stretch: 1; }
+
+                // Bounded Primary Sync & Scan Actions
+                VerticalLayout {
+                    spacing: 8px;
+                    vertical-stretch: 0;
+
+                    M3Button {
+                        fill-width: true;
+                        variant: "filled";
+                        has-icon: true;
+                        icon: @image-url("../../assets/icons/refresh.svg");
+                        text: "Check Releases";
+                        enabled: !root.is-busy;
+                        clicked => { root.check-all-releases(); }
                     }
 
                     M3Button {
                         fill-width: true;
-                        compact: true;
-                        variant: "outlined";
-                        text: "Cancel";
-                        clicked => { root.cancel-background-task(); }
+                        variant: "tonal";
+                        has-icon: true;
+                        icon: @image-url("../../assets/icons/folder.svg");
+                        text: "Scan Music Folders";
+                        enabled: !root.is-busy;
+                        clicked => { root.scan-library(); }
                     }
                 }
 
-                if !root.is-busy : VerticalLayout {
-                    spacing: 4px;
-                    alignment: start;
+                // Non-blocking Background Status & Telemetry Card
+                Rectangle {
+                    vertical-stretch: 0;
+                    border-radius: 12px;
+                    background: Theme.surface-container;
+                    border-width: 1px;
+                    border-color: root.status-is-warning
+                        ? Theme.error.with-alpha(0.55)
+                        : Theme.outline-variant;
 
-                    Text {
-                        text: root.library-summary-text;
-                        font-size: 11.5px;
-                        font-weight: 700;
-                        color: Theme.on-surface;
-                        wrap: word-wrap;
-                    }
-                    Text {
-                        text: root.status-banner-text;
-                        font-size: 11px;
-                        color: root.status-is-warning
-                            ? Theme.error
-                            : Theme.on-surface-muted;
-                        wrap: word-wrap;
+                    VerticalLayout {
+                        padding: 11px;
+                        spacing: 8px;
+                        alignment: start;
+
+                        if root.is-busy : VerticalLayout {
+                            spacing: 8px;
+                            alignment: start;
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                M3Spinner {
+                                    width: 16px;
+                                    height: 16px;
+                                    y: (parent.height - self.height) / 2;
+                                    indeterminate: true;
+                                }
+                                Text {
+                                    text: root.busy-label;
+                                    font-size: 11px;
+                                    font-weight: 600;
+                                    color: Theme.on-surface;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                    wrap: word-wrap;
+                                }
+                            }
+
+                            M3ProgressBar {
+                                height: 5px;
+                                indeterminate: root.progress-indeterminate;
+                                progress: root.progress-fraction;
+                            }
+
+                            M3Button {
+                                fill-width: true;
+                                compact: true;
+                                variant: "outlined";
+                                text: "Cancel";
+                                changed has-focus => { root.cancel-has-focus = self.has-focus; }
+                                clicked => { root.cancel-background-task(); }
+                            }
+                        }
+
+                        if !root.is-busy : VerticalLayout {
+                            spacing: 4px;
+                            alignment: start;
+
+                            Text {
+                                text: root.library-summary-text;
+                                font-size: 11.5px;
+                                font-weight: 700;
+                                color: Theme.on-surface;
+                                wrap: word-wrap;
+                            }
+                            Text {
+                                text: root.status-banner-text;
+                                font-size: 11px;
+                                color: root.status-is-warning
+                                    ? Theme.error
+                                    : Theme.on-surface-muted;
+                                wrap: word-wrap;
+                            }
+                        }
                     }
                 }
             }
+        }
+
+        M3ScrollBar {
+            x: parent.width - self.width;
+            y: 4px;
+            height: max(0px, parent.height - 8px);
+            page-size: rail-scroll.visible-height;
+            maximum: max(0px, rail-scroll.content-height - rail-scroll.visible-height);
+            value: -rail-scroll.content-y;
+            scrolled(val) => { rail-scroll.content-y = -val; }
+        }
+    }
+
+    // Icon shortcuts retain normal target sizes. The menu opens the very same
+    // labelled rail, so sync status, warnings and Cancel remain discoverable.
+    if root.compact : Rectangle {
+        width: 100%;
+        height: 100%;
+        compact-scroll := ScrollView {
+            width: 100%;
+            height: 100%;
+            vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+            horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+            content-width: self.visible-width;
+            content-height: max(self.visible-height, compact-content.preferred-height);
+            compact-content := VerticalLayout {
+                width: compact-scroll.visible-width;
+                height: max(compact-scroll.visible-height, self.preferred-height);
+                padding-top: 14px;
+                padding-bottom: 14px;
+                spacing: 8px;
+
+                HorizontalLayout {
+                    height: 40px;
+                    vertical-stretch: 0;
+                    alignment: center;
+                    M3IconButton {
+                        size: 40px;
+                        icon-size: 20px;
+                        icon: @image-url("../../assets/icons/menu.svg");
+                        accessible-name: "Open navigation and status";
+                        clicked => { root.expand-navigation(); }
+                    }
+                }
+                Rectangle {
+                    height: 1px;
+                    vertical-stretch: 0;
+                    background: Theme.outline-variant;
+                }
+                HorizontalLayout {
+                    height: 44px;
+                    vertical-stretch: 0;
+                    alignment: center;
+                    Rectangle {
+                        width: 44px;
+                        height: 44px;
+                        M3IconButton {
+                            size: 44px;
+                            icon: @image-url("../../assets/icons/radar.svg");
+                            accessible-name: "Release Radar";
+                            active: root.active-view == 0;
+                            clicked => { root.navigate(0); }
+                        }
+                        if root.unseen-badge-count > 0 : Rectangle {
+                            x: parent.width - 9px;
+                            y: 3px;
+                            width: 7px;
+                            height: 7px;
+                            border-radius: 3.5px;
+                            background: Theme.primary;
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    height: 44px;
+                    vertical-stretch: 0;
+                    alignment: center;
+                    M3IconButton {
+                        size: 44px;
+                        icon: @image-url("../../assets/icons/artists.svg");
+                        accessible-name: "Tracked Artists";
+                        active: root.active-view == 1;
+                        clicked => { root.navigate(1); }
+                    }
+                }
+                HorizontalLayout {
+                    height: 44px;
+                    vertical-stretch: 0;
+                    alignment: center;
+                    M3IconButton {
+                        size: 44px;
+                        icon: @image-url("../../assets/icons/settings.svg");
+                        accessible-name: "Library and Settings";
+                        active: root.active-view == 2;
+                        clicked => { root.navigate(2); }
+                    }
+                }
+
+                Rectangle { vertical-stretch: 1; }
+
+                HorizontalLayout {
+                    height: 40px;
+                    vertical-stretch: 0;
+                    alignment: center;
+                    M3IconButton {
+                        size: 40px;
+                        icon: @image-url("../../assets/icons/refresh.svg");
+                        accessible-name: "Check releases";
+                        enabled: !root.is-busy;
+                        clicked => { root.check-all-releases(); }
+                    }
+                }
+                HorizontalLayout {
+                    height: 40px;
+                    vertical-stretch: 0;
+                    alignment: center;
+                    M3IconButton {
+                        size: 40px;
+                        icon: @image-url("../../assets/icons/folder.svg");
+                        accessible-name: "Scan music folders";
+                        enabled: !root.is-busy;
+                        clicked => { root.scan-library(); }
+                    }
+                }
+                if root.is-busy || root.status-is-warning : HorizontalLayout {
+                    height: 32px;
+                    vertical-stretch: 0;
+                    alignment: center;
+                    M3IconButton {
+                        size: 32px;
+                        icon-size: 16px;
+                        icon: root.is-busy
+                            ? @image-url("../../assets/icons/refresh.svg")
+                            : @image-url("../../assets/icons/sparkles.svg");
+                        accessible-name: root.is-busy ? "Show task progress" : "Show status warning";
+                        danger: root.status-is-warning;
+                        active: root.status-is-warning;
+                        clicked => { root.expand-navigation(); }
+                    }
+                }
+            }
+        }
+        M3ScrollBar {
+            x: parent.width - self.width;
+            y: 4px;
+            height: max(0px, parent.height - 8px);
+            page-size: compact-scroll.visible-height;
+            maximum: max(0px, compact-scroll.content-height - compact-scroll.visible-height);
+            value: -compact-scroll.content-y;
+            scrolled(val) => { compact-scroll.content-y = -val; }
         }
     }
 

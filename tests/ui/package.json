@@ -1,0 +1,13 @@
+{
+  "name": "missnix-ui-regression-tests",
+  "private": true,
+  "scripts": {
+    "test": "node responsive.cjs"
+  },
+  "devDependencies": {
+    "slint-ui": "1.19.1"
+  },
+  "engines": {
+    "node": ">=22.18"
+  }
+}

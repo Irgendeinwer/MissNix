@@ -6,6 +6,7 @@ import {
     CoverArtwork,
     LocalAlbumItem,
     M3Button,
+    M3HorizontalScrollBar,
     M3IconButton,
     M3LabeledInput,
     M3ScrollBar,
@@ -48,15 +49,17 @@ export component InspectorDrawer inherits Rectangle {
     callback toggle-release-seen(int);
     callback view-artist-releases(int);
 
+    in property <length> available-width: 404px;
     property <int> delete-confirm-artist-id: 0;
-    property <bool> drawer-open:
+    property <length> panel-width: min(404px, root.available-width);
+    out property <bool> drawer-open:
         (root.active-view == 0 || root.active-view == 1)
         && ((root.inspector-mode == 1 && root.selected-release-id > 0)
             || (root.inspector-mode == 2 && root.selected-artist-id > 0));
     property <length> slide-offset: 404px;
     animate slide-offset { duration: 150ms; easing: cubic-bezier(0.2, 0.0, 0.0, 1.0); }
     changed drawer-open => { root.slide-offset = root.drawer-open ? 0px : 404px; }
-    width: self.drawer-open ? 404px : 0px;
+    width: self.drawer-open ? self.panel-width : 0px;
     horizontal-stretch: 0;
     background: Theme.surface-rail;
     clip: true;
@@ -76,7 +79,7 @@ export component InspectorDrawer inherits Rectangle {
     VerticalLayout {
         visible: root.drawer-open && root.inspector-mode == 1;
         x: root.slide-offset;
-        width: 404px;
+        width: root.panel-width;
         height: 100%;
         padding: 18px;
         spacing: 12px;
@@ -98,6 +101,7 @@ export component InspectorDrawer inherits Rectangle {
                 size: 32px;
                 icon-size: 15px;
                 icon: @image-url("../../assets/icons/close.svg");
+                accessible-name: "Close details";
                 clicked => { root.close-inspector(); }
             }
         }
@@ -111,10 +115,12 @@ export component InspectorDrawer inherits Rectangle {
                 height: 100%;
                 vertical-scrollbar-policy: ScrollBarPolicy.always-off;
                 horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+                content-width: max(320px, self.visible-width);
 
                 VerticalLayout {
-                    width: rel-scroll.visible-width;
+                    width: rel-scroll.content-width;
                     padding-right: 4px;
+                    padding-bottom: 12px;
                     spacing: 12px;
                     alignment: start;
 
@@ -122,8 +128,8 @@ export component InspectorDrawer inherits Rectangle {
                 HorizontalLayout {
                     alignment: center;
                     CoverArtwork {
-                        width: 224px;
-                        height: 224px;
+                        width: min(224px, max(0px, rel-scroll.visible-width - 4px));
+                        height: self.width;
                         cover: root.selected-release.cover;
                         has-cover: root.selected-release.has-cover;
                         monogram: root.selected-release.monogram;
@@ -132,36 +138,58 @@ export component InspectorDrawer inherits Rectangle {
                     }
                 }
 
-                // Bounded Badges Row
-                HorizontalLayout {
-                    spacing: 6px;
-                    alignment: start;
+                // Optional badges can exceed a narrow inspector; scroll that
+                // row rather than silently clipping the last provider badge.
+                Rectangle {
+                    height: 32px;
                     vertical-stretch: 0;
+                    badge-scroll := ScrollView {
+                        width: 100%;
+                        height: 32px;
+                        vertical-scrollbar-policy: ScrollBarPolicy.always-off;
+                        horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+                        content-width: max(self.visible-width, badge-row.preferred-width);
+                        content-height: 20px;
+                        badge-row := HorizontalLayout {
+                            width: self.preferred-width;
+                            height: 20px;
+                            spacing: 6px;
+                            alignment: start;
 
-                    TonalBadge {
-                        label: root.selected-release.release-type;
-                        badge-bg: Theme.primary-container;
-                        badge-fg: Theme.on-primary-container;
+                            TonalBadge {
+                                label: root.selected-release.release-type;
+                                badge-bg: Theme.primary-container;
+                                badge-fg: Theme.on-primary-container;
+                            }
+
+                            if root.selected-release.upcoming : TonalBadge {
+                                label: "UPCOMING";
+                                badge-bg: Theme.success-container;
+                                badge-fg: Theme.on-success-container;
+                            }
+
+                            if root.selected-release.owned-locally : TonalBadge {
+                                label: "IN LIBRARY";
+                            }
+
+                            if root.selected-release.explicit : TonalBadge {
+                                label: "EXPLICIT";
+                                badge-bg: Theme.error-container;
+                                badge-fg: Theme.on-error-container;
+                            }
+
+                            TonalBadge {
+                                label: root.selected-release.provider-label;
+                            }
+                        }
                     }
-
-                    if root.selected-release.upcoming : TonalBadge {
-                        label: "UPCOMING";
-                        badge-bg: Theme.success-container;
-                        badge-fg: Theme.on-success-container;
-                    }
-
-                    if root.selected-release.owned-locally : TonalBadge {
-                        label: "IN LIBRARY";
-                    }
-
-                    if root.selected-release.explicit : TonalBadge {
-                        label: "EXPLICIT";
-                        badge-bg: Theme.error-container;
-                        badge-fg: Theme.on-error-container;
-                    }
-
-                    TonalBadge {
-                        label: root.selected-release.provider-label;
+                    M3HorizontalScrollBar {
+                        y: 22px;
+                        width: badge-scroll.visible-width;
+                        page-size: badge-scroll.visible-width;
+                        maximum: max(0px, badge-scroll.content-width - badge-scroll.visible-width);
+                        value: -badge-scroll.content-x;
+                        scrolled(val) => { badge-scroll.content-x = -val; }
                     }
                 }
 
@@ -352,6 +380,15 @@ export component InspectorDrawer inherits Rectangle {
             }
         }
 
+        M3HorizontalScrollBar {
+            x: 0px;
+            y: parent.height - self.height;
+            width: rel-scroll.visible-width;
+            page-size: rel-scroll.visible-width;
+            maximum: max(0px, rel-scroll.content-width - rel-scroll.visible-width);
+            value: -rel-scroll.content-x;
+            scrolled(val) => { rel-scroll.content-x = -val; }
+        }
         M3ScrollBar {
             x: parent.width - self.width;
             y: 2px;
@@ -370,7 +407,7 @@ export component InspectorDrawer inherits Rectangle {
     VerticalLayout {
         visible: root.drawer-open && root.inspector-mode == 2;
         x: root.slide-offset;
-        width: 404px;
+        width: root.panel-width;
         height: 100%;
         padding: 18px;
         spacing: 12px;
@@ -393,6 +430,7 @@ export component InspectorDrawer inherits Rectangle {
             VerticalLayout {
                 alignment: center;
                 spacing: 4px;
+                min-width: 0px;
                 horizontal-stretch: 1;
 
                 Text {
@@ -429,6 +467,7 @@ export component InspectorDrawer inherits Rectangle {
                 size: 32px;
                 icon-size: 15px;
                 icon: @image-url("../../assets/icons/close.svg");
+                accessible-name: "Close details";
                 clicked => { root.close-inspector(); }
             }
         }
@@ -442,10 +481,12 @@ export component InspectorDrawer inherits Rectangle {
                 height: 100%;
                 vertical-scrollbar-policy: ScrollBarPolicy.always-off;
                 horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+                content-width: max(320px, self.visible-width);
 
                 VerticalLayout {
-                    width: art-scroll.visible-width;
+                    width: art-scroll.content-width;
                     padding-right: 4px;
+                    padding-bottom: 12px;
                     spacing: 13px;
                     alignment: start;
 
@@ -639,6 +680,15 @@ export component InspectorDrawer inherits Rectangle {
             }
         }
 
+        M3HorizontalScrollBar {
+            x: 0px;
+            y: parent.height - self.height;
+            width: art-scroll.visible-width;
+            page-size: art-scroll.visible-width;
+            maximum: max(0px, art-scroll.content-width - art-scroll.visible-width);
+            value: -art-scroll.content-x;
+            scrolled(val) => { art-scroll.content-x = -val; }
+        }
         M3ScrollBar {
             x: parent.width - self.width;
             y: 2px;

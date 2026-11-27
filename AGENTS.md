@@ -142,6 +142,7 @@ gh attestation verify missnix-v*-linux-x86_64.AppImage --repo Irgendeinwer/MissN
 - **Slint dimension constraint rule**: Never set both fixed `height` and `min-height`/`max-height` without a dynamic `max(...)` expression where appropriate, and avoid unbounded stretching on buttons or inputs (`vertical-stretch: 0`).
 - **Explicit `x: 0px` on non-layout progress fills**: Any child `Rectangle` inside a plain `Rectangle` whose `width` varies (seek bars, volume bars, progress bars) **must** specify `x: 0px;` so it anchors to the left rather than centering.
 - **Startup & Wayland HiDPI UI scaling (`src/controller/mod.rs`)**: `WinitWindowAdapter::ensure_window()` and Wayland's initial post-map `ScaleFactorChanged` / `fractional_scale` events reset `window().scale_factor()` after `AppWindow::new()`. Keep `applied_scale_factor` synchronized once `window().size().width > 0` so persisted `ui_scale_percent` takes effect immediately on launch and across monitor DPI changes.
+- **Responsive shell**: Below 980 logical pixels use the compact rail; below 1348 logical pixels overlay the inspector without shrinking the center. Keep task status and Cancel available in the expanded rail, preserve the player and scrollable content in short windows, and allow panning rather than clipping controls at exceptionally narrow sizes.
 - **Viewport culling & non-blocking UI**: Keep row culling active in `feed-scroll` (`ui/views/radar-view.slint`), decode cover thumbnails at bounded resolution (`300px`), and run all I/O, scanning, HTTP requests, image decoding, and audio playback on background threads.
 
 ### Audio Preview Engine (`src/audio_player/` & `sync.rs`)
@@ -162,6 +163,16 @@ Run all checks locally (inside `nix develop` or a Rust 2024 toolchain environmen
   nix flake check
 } 2>&1 | tee log.txt
 ```
+
+The responsive Slint interaction tests also run in CI. On Linux, with Node.js 22.18+ and Xvfb installed:
+
+```bash
+npm ci --prefix tests/ui --ignore-scripts
+xvfb-run -a -s "-screen 0 1920x1200x24" \
+  env WINIT_UNIX_BACKEND=x11 SLINT_BACKEND=winit-skia-software npm test --prefix tests/ui
+```
+
+These tests dispatch resize, scale, pointer, and key events to the UI; compositor-specific HiDPI behavior still needs testing on a real desktop.
 
 ### Publishing an Immutable Release
 

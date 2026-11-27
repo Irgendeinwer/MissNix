@@ -2,13 +2,15 @@ import { ScrollView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { FolderRowData } from "../models.slint";
 import {
-    AccentSwatch,
+    AccentSwatchGrid,
     FolderItemRow,
     M3Button,
-    M3FilterChip,
+    M3ChipGrid,
+    M3HorizontalScrollBar,
+    M3LabeledChipGrid,
     M3LabeledInput,
+    M3LabeledSelect,
     M3ScrollBar,
-    M3Select,
     M3Switch,
     SectionCard,
 } from "../components.slint";
@@ -54,9 +56,13 @@ export component SettingsView inherits Rectangle {
         height: 100%;
         vertical-scrollbar-policy: ScrollBarPolicy.always-off;
         horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+        // Only extremely narrow logical widths need horizontal panning. Keep
+        // controls readable even if the system font needs wider chips.
+        // The extra 84px is the horizontal page and card padding.
+        content-width: max(max(396px, self.visible-width), discovery-grid.cell-width + 84px);
 
         HorizontalLayout {
-            width: settings-scroll.visible-width;
+            width: settings-scroll.content-width;
             padding-top: 22px;
             padding-bottom: 28px;
             padding-left: 22px;
@@ -64,6 +70,7 @@ export component SettingsView inherits Rectangle {
             alignment: center;
 
             VerticalLayout {
+                min-width: 0px;
                 max-width: 900px;
                 horizontal-stretch: 1;
                 spacing: 16px;
@@ -80,6 +87,7 @@ export component SettingsView inherits Rectangle {
                     }
                     Text {
                         text: "Customize Material 3 appearance, HiDPI interface scaling, artist discovery rules, and release sources";
+                        wrap: word-wrap;
                         font-size: 12px;
                         color: Theme.on-surface-variant;
                     }
@@ -110,92 +118,12 @@ export component SettingsView inherits Rectangle {
                             color: Theme.on-surface;
                         }
 
-                        VerticalLayout {
-                            spacing: 8px;
-                            alignment: start;
-
-                            HorizontalLayout {
-                                spacing: 8px;
-                                alignment: start;
-
-                                AccentSwatch {
-                                    swatch-color: #c6b8ff;
-                                    label: "Iris";
-                                    selected: root.pref-accent-preset == 0;
-                                    clicked => {
-                                        root.apply-theme(root.pref-dark-mode, 0);
-                                        root.preferences-changed();
-                                    }
-                                }
-                                AccentSwatch {
-                                    swatch-color: #76d0ff;
-                                    label: "Frost";
-                                    selected: root.pref-accent-preset == 1;
-                                    clicked => {
-                                        root.apply-theme(root.pref-dark-mode, 1);
-                                        root.preferences-changed();
-                                    }
-                                }
-                                AccentSwatch {
-                                    swatch-color: #6ddeac;
-                                    label: "Emerald";
-                                    selected: root.pref-accent-preset == 2;
-                                    clicked => {
-                                        root.apply-theme(root.pref-dark-mode, 2);
-                                        root.preferences-changed();
-                                    }
-                                }
-                                AccentSwatch {
-                                    swatch-color: #fdb354;
-                                    label: "Amber";
-                                    selected: root.pref-accent-preset == 3;
-                                    clicked => {
-                                        root.apply-theme(root.pref-dark-mode, 3);
-                                        root.preferences-changed();
-                                    }
-                                }
-                            }
-
-                            HorizontalLayout {
-                                spacing: 8px;
-                                alignment: start;
-
-                                AccentSwatch {
-                                    swatch-color: #ffa9ad;
-                                    label: "Coral";
-                                    selected: root.pref-accent-preset == 4;
-                                    clicked => {
-                                        root.apply-theme(root.pref-dark-mode, 4);
-                                        root.preferences-changed();
-                                    }
-                                }
-                                AccentSwatch {
-                                    swatch-color: #ffad8d;
-                                    label: "Copper";
-                                    selected: root.pref-accent-preset == 5;
-                                    clicked => {
-                                        root.apply-theme(root.pref-dark-mode, 5);
-                                        root.preferences-changed();
-                                    }
-                                }
-                                AccentSwatch {
-                                    swatch-color: #c4c4c4;
-                                    label: "Graphite";
-                                    selected: root.pref-accent-preset == 6;
-                                    clicked => {
-                                        root.apply-theme(root.pref-dark-mode, 6);
-                                        root.preferences-changed();
-                                    }
-                                }
-                                AccentSwatch {
-                                    swatch-color: Theme.custom-swatch;
-                                    label: "Custom";
-                                    selected: root.pref-accent-preset == 7;
-                                    clicked => {
-                                        root.apply-theme(root.pref-dark-mode, 7);
-                                        root.preferences-changed();
-                                    }
-                                }
+                        AccentSwatchGrid {
+                            selected-index: root.pref-accent-preset;
+                            custom-color: Theme.custom-swatch;
+                            selected(index) => {
+                                root.apply-theme(root.pref-dark-mode, index);
+                                root.preferences-changed();
                             }
                         }
 
@@ -204,43 +132,41 @@ export component SettingsView inherits Rectangle {
                             spacing: 6px;
                             alignment: start;
 
-                            HorizontalLayout {
-                                spacing: 10px;
-                                alignment: start;
+                            custom-controls := Rectangle {
+                                property <bool> stacked: self.width < 300px;
+                                property <bool> palette-below: self.width < 490px;
+                                height: self.stacked ? 124px : self.palette-below ? 82px : 38px;
+                                min-width: 0px;
+                                vertical-stretch: 0;
 
-                                M3LabeledInput {
-                                    width: 175px;
+                                hex-input := M3LabeledInput {
+                                    x: 0px;
+                                    y: 0px;
+                                    width: custom-controls.stacked ? min(175px, custom-controls.width)
+                                        : min(175px, max(0px, custom-controls.width - apply-hex.width - 10px));
                                     placeholder: "#EA6C34";
                                     text <=> root.pref-custom-accent-hex;
-                                    edited => {
-                                        root.custom-accent-changed(root.pref-custom-accent-hex, false);
-                                    }
-                                    accepted(val) => {
-                                        root.custom-accent-changed(val, true);
-                                    }
+                                    edited => { root.custom-accent-changed(root.pref-custom-accent-hex, false); }
+                                    accepted(val) => { root.custom-accent-changed(val, true); }
                                 }
-
-                                M3Button {
-                                    y: (parent.height - self.height) / 2;
+                                apply-hex := M3Button {
+                                    x: custom-controls.stacked ? 0px : hex-input.width + 10px;
+                                    y: custom-controls.stacked ? 44px : 1px;
+                                    width: self.preferred-width;
                                     variant: root.pref-accent-preset == 7 ? "filled" : "primary-tonal";
                                     text: "Apply Custom Hex";
-                                    clicked => {
-                                        root.custom-accent-changed(root.pref-custom-accent-hex, true);
-                                    }
+                                    clicked => { root.custom-accent-changed(root.pref-custom-accent-hex, true); }
                                 }
-
-                                // Live 4-stop Material 3 Tonal Palette Preview Strip
                                 Rectangle {
+                                    x: custom-controls.palette-below ? 0px : apply-hex.x + apply-hex.width + 10px;
+                                    y: custom-controls.stacked ? 88px : custom-controls.palette-below ? 44px : 3px;
                                     width: 124px;
                                     height: 32px;
-                                    y: (parent.height - self.height) / 2;
                                     border-radius: 9px;
                                     border-width: 1px;
                                     border-color: Theme.outline;
                                     clip: true;
-
                                     HorizontalLayout {
-                                        spacing: 0px;
                                         Rectangle { horizontal-stretch: 1; background: Theme.surface; }
                                         Rectangle { horizontal-stretch: 1; background: Theme.surface-container-high; }
                                         Rectangle { horizontal-stretch: 1; background: Theme.primary-container; }
@@ -270,44 +196,22 @@ export component SettingsView inherits Rectangle {
                             color: Theme.on-surface;
                         }
 
-                        HorizontalLayout {
-                            spacing: 8px;
-                            alignment: start;
-
-                            M3FilterChip {
-                                label: "90%";
-                                selected: root.pref-ui-scale-pct == 90;
-                                clicked => { root.ui-scale-changed(90); }
-                            }
-                            M3FilterChip {
-                                label: "100%";
-                                selected: root.pref-ui-scale-pct == 100;
-                                clicked => { root.ui-scale-changed(100); }
-                            }
-                            M3FilterChip {
-                                label: "115%";
-                                selected: root.pref-ui-scale-pct == 115;
-                                clicked => { root.ui-scale-changed(115); }
-                            }
-                            M3FilterChip {
-                                label: "125%";
-                                selected: root.pref-ui-scale-pct == 125;
-                                clicked => { root.ui-scale-changed(125); }
-                            }
-                            M3FilterChip {
-                                label: "150%";
-                                selected: root.pref-ui-scale-pct == 150;
-                                clicked => { root.ui-scale-changed(150); }
-                            }
-                            M3FilterChip {
-                                label: "175%";
-                                selected: root.pref-ui-scale-pct == 175;
-                                clicked => { root.ui-scale-changed(175); }
-                            }
-                            M3FilterChip {
-                                label: "200%";
-                                selected: root.pref-ui-scale-pct == 200;
-                                clicked => { root.ui-scale-changed(200); }
+                        M3ChipGrid {
+                            labels: ["90%", "100%", "115%", "125%", "150%", "175%", "200%"];
+                            selections: [root.pref-ui-scale-pct == 90, root.pref-ui-scale-pct == 100,
+                                root.pref-ui-scale-pct == 115, root.pref-ui-scale-pct == 125,
+                                root.pref-ui-scale-pct == 150, root.pref-ui-scale-pct == 175,
+                                root.pref-ui-scale-pct == 200];
+                            item-width: 84px;
+                            widest-label: "100%";
+                            activated(index) => {
+                                if (index == 0) { root.ui-scale-changed(90); }
+                                else if (index == 1) { root.ui-scale-changed(100); }
+                                else if (index == 2) { root.ui-scale-changed(115); }
+                                else if (index == 3) { root.ui-scale-changed(125); }
+                                else if (index == 4) { root.ui-scale-changed(150); }
+                                else if (index == 5) { root.ui-scale-changed(175); }
+                                else if (index == 6) { root.ui-scale-changed(200); }
                             }
                         }
 
@@ -319,42 +223,15 @@ export component SettingsView inherits Rectangle {
                         }
                     }
 
-                    HorizontalLayout {
-                        spacing: 10px;
-                        alignment: start;
-
-                        Text {
-                            text: "Release Cover Grid Size:";
-                            font-size: 12.5px;
-                            font-weight: 600;
-                            color: Theme.on-surface;
-                            vertical-alignment: center;
-                            width: 190px;
-                        }
-
-                        M3FilterChip {
-                            label: "Compact";
-                            selected: root.pref-grid-density == 0;
-                            clicked => {
-                                root.pref-grid-density = 0;
-                                root.preferences-changed();
-                            }
-                        }
-                        M3FilterChip {
-                            label: "Comfortable";
-                            selected: root.pref-grid-density == 1;
-                            clicked => {
-                                root.pref-grid-density = 1;
-                                root.preferences-changed();
-                            }
-                        }
-                        M3FilterChip {
-                            label: "Spacious";
-                            selected: root.pref-grid-density == 2;
-                            clicked => {
-                                root.pref-grid-density = 2;
-                                root.preferences-changed();
-                            }
+                    M3LabeledChipGrid {
+                        label: "Release Cover Grid Size:";
+                        labels: ["Compact", "Comfortable", "Spacious"];
+                        selections: [root.pref-grid-density == 0, root.pref-grid-density == 1, root.pref-grid-density == 2];
+                        item-width: 132px;
+                        widest-label: "Comfortable";
+                        activated(index) => {
+                            root.pref-grid-density = index;
+                            root.preferences-changed();
                         }
                     }
                 }
@@ -364,18 +241,26 @@ export component SettingsView inherits Rectangle {
                     title: "Local Music Folders & Artist Discovery";
                     subtitle: "Configure your music directories and choose how MissNix extracts artist identity from ALBUMARTIST tags, folder names, and collaboration credits.";
 
-                    HorizontalLayout {
-                        spacing: 10px;
+                    folder-controls := Rectangle {
+                        property <bool> stacked: self.width < 490px;
+                        property <bool> buttons-stacked: self.width < add-path.width + browse.width + 10px;
+                        height: self.buttons-stacked ? 126px : self.stacked ? 86px : 38px;
+                        min-width: 0px;
+                        vertical-stretch: 0;
 
-                        M3LabeledInput {
-                            horizontal-stretch: 1;
+                        folder-input := M3LabeledInput {
+                            x: 0px;
+                            y: 0px;
+                            width: folder-controls.stacked ? folder-controls.width
+                                : max(0px, folder-controls.width - add-path.width - browse.width - 20px);
                             placeholder: "Enter music directory path (e.g. ~/Music) or click Browse...";
                             text <=> root.new-folder-path;
                             accepted(val) => { root.add-folder-path(val); }
                         }
-
-                        M3Button {
-                            y: (parent.height - self.height) / 2;
+                        add-path := M3Button {
+                            x: folder-controls.stacked ? 0px : folder-input.width + 10px;
+                            y: folder-controls.stacked ? 48px : 1px;
+                            width: self.preferred-width;
                             variant: "primary-tonal";
                             has-icon: true;
                             icon: @image-url("../../assets/icons/plus.svg");
@@ -383,9 +268,10 @@ export component SettingsView inherits Rectangle {
                             enabled: root.new-folder-path != "";
                             clicked => { root.add-folder-path(root.new-folder-path); }
                         }
-
-                        M3Button {
-                            y: (parent.height - self.height) / 2;
+                        browse := M3Button {
+                            x: folder-controls.buttons-stacked ? 0px : add-path.x + add-path.width + 10px;
+                            y: folder-controls.buttons-stacked ? 88px : add-path.y;
+                            width: self.preferred-width;
                             variant: "outlined";
                             has-icon: true;
                             icon: @image-url("../../assets/icons/folder-plus.svg");
@@ -421,33 +307,14 @@ export component SettingsView inherits Rectangle {
                             color: Theme.on-surface;
                         }
 
-                        HorizontalLayout {
-                            spacing: 8px;
-                            alignment: start;
-
-                            M3FilterChip {
-                                label: "Album Artist + Folder (Recommended)";
-                                selected: root.pref-discovery-mode == 0;
-                                clicked => {
-                                    root.pref-discovery-mode = 0;
-                                    root.scan-preferences-changed();
-                                }
-                            }
-                            M3FilterChip {
-                                label: "Folder Structure Only";
-                                selected: root.pref-discovery-mode == 1;
-                                clicked => {
-                                    root.pref-discovery-mode = 1;
-                                    root.scan-preferences-changed();
-                                }
-                            }
-                            M3FilterChip {
-                                label: "All Metadata Tags + Folder";
-                                selected: root.pref-discovery-mode == 2;
-                                clicked => {
-                                    root.pref-discovery-mode = 2;
-                                    root.scan-preferences-changed();
-                                }
+                        discovery-grid := M3ChipGrid {
+                            labels: ["Album Artist + Folder (Recommended)", "Folder Structure Only", "All Metadata Tags + Folder"];
+                            selections: [root.pref-discovery-mode == 0, root.pref-discovery-mode == 1, root.pref-discovery-mode == 2];
+                            item-width: 310px;
+                            widest-label: "Album Artist + Folder (Recommended)";
+                            activated(index) => {
+                                root.pref-discovery-mode = index;
+                                root.scan-preferences-changed();
                             }
                         }
 
@@ -493,42 +360,17 @@ export component SettingsView inherits Rectangle {
                     title: "Release Radar & Smart Deduplication";
                     subtitle: "Control which release types appear in your feed and suppress albums already owned in your local library.";
 
-                    HorizontalLayout {
-                        spacing: 8px;
-                        alignment: start;
-
-                        Text {
-                            text: "Included Release Types:";
-                            font-size: 12.5px;
-                            font-weight: 600;
-                            color: Theme.on-surface;
-                            vertical-alignment: center;
-                            width: 190px;
-                        }
-
-                        M3FilterChip {
-                            label: "Albums";
-                            selected: root.pref-include-albums;
-                            clicked => {
-                                root.pref-include-albums = !root.pref-include-albums;
-                                root.preferences-changed();
-                            }
-                        }
-                        M3FilterChip {
-                            label: "EPs";
-                            selected: root.pref-include-eps;
-                            clicked => {
-                                root.pref-include-eps = !root.pref-include-eps;
-                                root.preferences-changed();
-                            }
-                        }
-                        M3FilterChip {
-                            label: "Singles";
-                            selected: root.pref-include-singles;
-                            clicked => {
-                                root.pref-include-singles = !root.pref-include-singles;
-                                root.preferences-changed();
-                            }
+                    M3LabeledChipGrid {
+                        label: "Included Release Types:";
+                        labels: ["Albums", "EPs", "Singles"];
+                        selections: [root.pref-include-albums, root.pref-include-eps, root.pref-include-singles];
+                        item-width: 98px;
+                        widest-label: "Singles";
+                        activated(index) => {
+                            if (index == 0) { root.pref-include-albums = !root.pref-include-albums; }
+                            else if (index == 1) { root.pref-include-eps = !root.pref-include-eps; }
+                            else if (index == 2) { root.pref-include-singles = !root.pref-include-singles; }
+                            root.preferences-changed();
                         }
                     }
 
@@ -544,30 +386,12 @@ export component SettingsView inherits Rectangle {
                         toggled => { root.preferences-changed(); }
                     }
 
-                    HorizontalLayout {
-                        spacing: 14px;
-                        alignment: start;
-                        Text {
-                            text: "Release lookback window:";
-                            font-size: 12.5px;
-                            font-weight: 600;
-                            color: Theme.on-surface;
-                            vertical-alignment: center;
-                            width: 190px;
-                        }
-                        M3Select {
-                            width: 240px;
-                            height: 36px;
-                            model: [
-                                "Last 90 days",
-                                "Last 6 months",
-                                "Last 1 year",
-                                "Last 2 years",
-                                "All time"
-                            ];
-                            current-index <=> root.pref-lookback-index;
-                            selected => { root.preferences-changed(); }
-                        }
+                    M3LabeledSelect {
+                        label: "Release lookback window:";
+                        select-width: 240px;
+                        model: ["Last 90 days", "Last 6 months", "Last 1 year", "Last 2 years", "All time"];
+                        current-index <=> root.pref-lookback-index;
+                        selected => { root.preferences-changed(); }
                     }
                 }
 
@@ -576,57 +400,34 @@ export component SettingsView inherits Rectangle {
                     title: "Metadata Providers & Automatic Schedule";
                     subtitle: "Deezer provides artwork, tracklists, and in-app 30s audio previews; MusicBrainz provides exact MBID disambiguation and upcoming release dates.";
 
-                    HorizontalLayout {
-                        spacing: 14px;
-                        alignment: start;
-                        Text {
-                            text: "Release lookup sources:";
-                            font-size: 12.5px;
-                            font-weight: 600;
-                            color: Theme.on-surface;
-                            vertical-alignment: center;
-                            width: 190px;
-                        }
-                        M3Select {
-                            width: 290px;
-                            height: 36px;
-                            model: [
-                                "Deezer + MusicBrainz (Recommended)",
-                                "Deezer Only",
-                                "MusicBrainz Only"
-                            ];
-                            current-index <=> root.pref-provider-index;
-                            selected => { root.preferences-changed(); }
-                        }
+                    M3LabeledSelect {
+                        label: "Release lookup sources:";
+                        select-width: 290px;
+                        model: ["Deezer + MusicBrainz (Recommended)", "Deezer Only", "MusicBrainz Only"];
+                        current-index <=> root.pref-provider-index;
+                        selected => { root.preferences-changed(); }
                     }
 
-                    HorizontalLayout {
-                        spacing: 14px;
-                        alignment: start;
-                        Text {
-                            text: "Automatic check schedule:";
-                            font-size: 12.5px;
-                            font-weight: 600;
-                            color: Theme.on-surface;
-                            vertical-alignment: center;
-                            width: 190px;
-                        }
-                        M3Select {
-                            width: 290px;
-                            height: 36px;
-                            model: [
-                                "Manual check only",
-                                "Every 6 hours",
-                                "Every 12 hours",
-                                "Every 24 hours"
-                            ];
-                            current-index <=> root.pref-schedule-index;
-                            selected => { root.preferences-changed(); }
-                        }
+                    M3LabeledSelect {
+                        label: "Automatic check schedule:";
+                        select-width: 290px;
+                        model: ["Manual check only", "Every 6 hours", "Every 12 hours", "Every 24 hours"];
+                        current-index <=> root.pref-schedule-index;
+                        selected => { root.preferences-changed(); }
                     }
                 }
             }
         }
+    }
+
+    M3HorizontalScrollBar {
+        x: 0px;
+        y: parent.height - self.height;
+        width: settings-scroll.visible-width;
+        page-size: settings-scroll.visible-width;
+        maximum: max(0px, settings-scroll.content-width - settings-scroll.visible-width);
+        value: -settings-scroll.content-x;
+        scrolled(val) => { settings-scroll.content-x = -val; }
     }
 
     M3ScrollBar {

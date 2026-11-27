@@ -138,6 +138,33 @@ jobs:
           "$BIN" --db "$SMOKE_DIR/smoke.db" --check --notify --status --json | python3 -c 'import json, sys; r = json.load(sys.stdin); assert r["check"]["artists_checked"] == 0 and r["status"]["tracked_artists"] == 0'
           rm -rf "$SMOKE_DIR"
 
+  ui:
+    name: Slint responsive UI interactions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install virtual display and fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xvfb xauth libx11-6 libxcb1 libxcursor1 libxi6 libxrandr2 \
+            libxkbcommon-x11-0 libfontconfig1 libfreetype6 fonts-dejavu-core
+
+      - name: Install pinned UI test dependencies
+        run: npm ci --prefix tests/ui --ignore-scripts --no-audit --no-fund
+
+      - name: Exercise responsive Slint layouts
+        run: |
+          xvfb-run -a -s "-screen 0 1920x1200x24" \
+            env WINIT_UNIX_BACKEND=x11 SLINT_BACKEND=winit-skia-software npm test --prefix tests/ui
+
   nix:
     name: Nix (flake check, build, develop, headless CLI)
     runs-on: ubuntu-latest
