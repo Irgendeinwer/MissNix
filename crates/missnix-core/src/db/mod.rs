@@ -28,11 +28,12 @@ fn validate_compatible_schema(conn: &Connection, db_path: Option<&Path>) -> Core
         |r| r.get(0),
     )?;
     let empty = existing_objects == 0 && version == 0 && application_id == 0;
-    if !(0..=SCHEMA_VERSION).contains(&version)
-        || (!empty
-            && !is_canonical_schema_valid(conn)?
-            && !is_partial_canonical_schema_valid(conn)?)
-    {
+    // A deliberately pre-seeded partial schema has no application ID. Do not
+    // complete a lookalike settings table belonging to a different application.
+    let compatible = empty
+        || is_canonical_schema_valid(conn)?
+        || (application_id == 0 && is_partial_canonical_schema_valid(conn)?);
+    if !(0..=SCHEMA_VERSION).contains(&version) || !compatible {
         let database = db_path
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "in-memory database".to_string());

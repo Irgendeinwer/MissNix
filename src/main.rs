@@ -3,7 +3,7 @@ mod controller;
 mod folder_picker;
 
 use std::path::PathBuf;
-use std::process::{Command, ExitCode};
+use std::process::{Command, ExitCode, Stdio};
 
 use missnix_core::{
     AppPaths, Database, HeadlessReport, ProgressEvent, SyncEngine,
@@ -39,7 +39,7 @@ fn main() -> ExitCode {
     while i < args.len() {
         match args[i].as_str() {
             "-h" | "--help" => {
-                print_help();
+                println!("{}", help_text());
                 return ExitCode::SUCCESS;
             }
             "-V" | "--version" => {
@@ -96,8 +96,7 @@ fn main() -> ExitCode {
                 headless.notify = true;
             }
             unknown => {
-                eprintln!("Unknown argument: {unknown}\n");
-                print_help();
+                eprintln!("Unknown argument: {unknown}\n\n{}", help_text());
                 return ExitCode::FAILURE;
             }
         }
@@ -291,6 +290,8 @@ fn send_release_notification(new_added: usize, unseen_total: usize) {
     match Command::new("notify-send")
         .args(["-a", "MissNix", "-i", "missnix", "MissNix Release Radar"])
         .arg(&body)
+        // A notification helper must not contaminate structured CLI output.
+        .stdout(Stdio::null())
         .status()
     {
         Ok(status) if status.success() => {}
@@ -303,8 +304,8 @@ fn send_release_notification(new_added: usize, unseen_total: usize) {
     }
 }
 
-fn print_help() {
-    println!(
+fn help_text() -> String {
+    format!(
         "MissNix {} — A desktop release radar for your local music library\n\n\
          USAGE:\n  \
            missnix [OPTIONS]\n\n\
@@ -320,5 +321,5 @@ fn print_help() {
            -h, --help        Print help information\n  \
            -V, --version     Print version",
         env!("CARGO_PKG_VERSION")
-    );
+    )
 }

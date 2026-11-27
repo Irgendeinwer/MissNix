@@ -100,8 +100,42 @@ jobs:
           echo "$OUT" | grep -q "Artists: 1 total (1 tracked"
           echo "$OUT" | grep -q "Local Albums Indexed: 1"
           JSON_OUT=$("$BIN" --db "$SMOKE_DIR/smoke.db" --json)
-          echo "$JSON_OUT" | grep -q '"tracked_artists": 1'
-          echo "$JSON_OUT" | grep -q '"local_albums": 1'
+          printf '%s\n' "$JSON_OUT" | python3 -c 'import json, sys; s = json.load(sys.stdin)["status"]; assert s["tracked_artists"] == 1 and s["local_albums"] == 1'
+          if "$BIN" --json --unknown-option > "$SMOKE_DIR/args.out" 2> "$SMOKE_DIR/args.err"; then
+            echo "Expected an unknown argument to fail" >&2
+            exit 1
+          fi
+          test ! -s "$SMOKE_DIR/args.out"
+          grep -q 'Unknown argument: --unknown-option' "$SMOKE_DIR/args.err"
+          if "$BIN" --json --notify > "$SMOKE_DIR/notify.out" 2> "$SMOKE_DIR/notify.err"; then
+            echo "Expected --notify without --check to fail" >&2
+            exit 1
+          fi
+          test ! -s "$SMOKE_DIR/notify.out"
+          grep -q -- '--notify requires --check' "$SMOKE_DIR/notify.err"
+
+          # Force a deterministic per-artist database error before any network request.
+          # An incomplete check must fail while still emitting one valid JSON report.
+          python3 -c 'import sqlite3, sys; c = sqlite3.connect(sys.argv[1]); c.execute("UPDATE local_albums SET track_count = ?", ("invalid",)); c.commit(); c.close()' "$SMOKE_DIR/smoke.db"
+          if "$BIN" --db "$SMOKE_DIR/smoke.db" --check --notify --status --json > "$SMOKE_DIR/incomplete.json" 2> "$SMOKE_DIR/incomplete.err"; then
+            echo "Expected an incomplete check to fail" >&2
+            exit 1
+          fi
+          python3 -c 'import json, sys; r = json.load(open(sys.argv[1])); assert r["check"]["artists_failed"] == 1 and r["check"]["artists_checked"] == 0 and r["status"]["local_albums"] == 1' "$SMOKE_DIR/incomplete.json"
+          grep -q 'Release check was incomplete' "$SMOKE_DIR/incomplete.err"
+          python3 -c 'import sqlite3, sys; c = sqlite3.connect(sys.argv[1]); c.execute("UPDATE local_albums SET track_count = 1"); c.commit(); c.close()' "$SMOKE_DIR/smoke.db"
+
+          # An unexpectedly empty mount must leave the previous data intact until confirmed.
+          rm "$SMOKE_DIR/music/Boards of Canada/1998 - Music Has the Right to Children [FLAC]/01 - Wildlife Analysis.flac"
+          if "$BIN" --db "$SMOKE_DIR/smoke.db" --scan "$SMOKE_DIR/music" --status --json > "$SMOKE_DIR/empty.json" 2> "$SMOKE_DIR/empty.err"; then
+            echo "Expected an unconfirmed empty scan to fail" >&2
+            exit 1
+          fi
+          test ! -s "$SMOKE_DIR/empty.json"
+          grep -q 'previously contained audio files' "$SMOKE_DIR/empty.err"
+          "$BIN" --db "$SMOKE_DIR/smoke.db" --json | python3 -c 'import json, sys; assert json.load(sys.stdin)["status"]["local_albums"] == 1'
+          "$BIN" --db "$SMOKE_DIR/smoke.db" --scan "$SMOKE_DIR/music" --accept-empty-folders --status --json | python3 -c 'import json, sys; r = json.load(sys.stdin); assert r["scan"]["audio_files_seen"] == 0 and r["status"]["local_albums"] == 0 and r["status"]["missing_artists"] == 1'
+          "$BIN" --db "$SMOKE_DIR/smoke.db" --check --notify --status --json | python3 -c 'import json, sys; r = json.load(sys.stdin); assert r["check"]["artists_checked"] == 0 and r["status"]["tracked_artists"] == 0'
           rm -rf "$SMOKE_DIR"
 
   nix:

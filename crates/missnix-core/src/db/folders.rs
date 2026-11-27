@@ -112,17 +112,6 @@ impl Database {
     /// instead, so changes made while the scan runs cannot be overwritten.
     pub fn apply_scan_outcome(&mut self, outcome: &ScanOutcome) -> CoreResult<()> {
         let snapshot = self.prepare_library_scan()?;
-        // An unchecked empty outcome with no configured folders may indicate an
-        // unmounted or otherwise absent scan. Only the checked API can explicitly
-        // reconcile an intentionally empty folder configuration.
-        if snapshot.folders.is_empty()
-            && outcome.folder_track_counts.is_empty()
-            && outcome.artists.is_empty()
-            && outcome.summary.folders_scanned == 0
-            && outcome.summary.audio_files_seen == 0
-        {
-            return Ok(());
-        }
         self.apply_scan_outcome_checked(outcome, &snapshot, false, None)
     }
 

@@ -172,14 +172,16 @@ missnix [OPTIONS]
   library**; they resume tracking if found again, or can be manually tracked from their
   artist details. Manually added artists remain tracked when local files disappear.
 - Unknown, incompatible, or newer database schemas are rejected without an automatic
-  rebuild. Keep the original database and any SQLite `-wal`/`-shm` files together; use a
-  verified backup or an explicit migration rather than opening unrelated files as MissNix
-  databases. Existing incorrect provider IDs from earlier scans can be corrected in an
-  artist's details. Same-name search results are kept separate, but the database currently
-  supports only one artist per normalized name; distinct homonyms cannot yet both be tracked.
+  rebuild. A compatible pre-seeded partial schema is completed in place. Keep the original
+  database and any SQLite `-wal`/`-shm` files together; use a verified backup or an
+  explicit migration rather than opening unrelated files as MissNix databases. Existing
+  incorrect provider IDs from earlier scans can be corrected in an artist's details.
+  Same-name search results are kept separate, but the database currently supports only one
+  artist per normalized name; distinct homonyms cannot yet both be tracked.
 - A partial or failed provider check is shown as a warning; `--check` exits non-zero if
-  any artist was not fully checked. Successfully fetched releases are retained. The
-  **Mark Filtered Seen** action only changes releases matching the current radar filters.
+  any artist was not fully checked. With `--json`, its report remains on stdout and the
+  error goes to stderr. Successfully fetched releases are retained. The **Mark Filtered
+  Seen** action only changes releases matching the current radar filters.
 - Cover, avatar and preview caches are namespaced by database path. Older shared-cache
   files are left on disk but are not reused, avoiding cross-database mix-ups.
 

@@ -339,16 +339,12 @@ fn retires_stale_local_artists_without_losing_history_and_persists_settings() {
 
 #[test]
 fn preserves_local_albums_on_unmounted_scan_and_completes_partial_settings_schema() {
-    let dir = std::env::temp_dir().join(format!(
-        "missnix_partial_schema_test_{}_{}",
-        std::process::id(),
-        now_rfc3339_utc().replace([':', '-'], "")
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    use crate::scanner::scan_library_folders_with_options;
+
+    let dir = unique_test_dir("partial_schema_unmounted");
     let db_path = dir.join("missnix.db");
 
-    // Pre-seed only the canonical `settings` table before MissNix ever opens the DB.
+    // A canonical settings table can be pre-seeded before the first launch.
     {
         let raw = Connection::open(&db_path).unwrap();
         raw.execute_batch(
@@ -362,49 +358,51 @@ fn preserves_local_albums_on_unmounted_scan_and_completes_partial_settings_schem
     assert!(!dir.join("missnix.db.bak").exists());
     assert_eq!(db.load_settings().unwrap().custom_accent_hex, "#E9B143");
 
-    // Verify env theme defaults apply when unset and normalize `#RRGGBB` to preset 7.
-    let mut env_defaults = AppSettings::default();
-    env_defaults.apply_env_theme_defaults(Some("false"), Some("#e9b143"));
-    assert!(!env_defaults.dark_mode);
-    assert_eq!(
-        env_defaults.accent_preset,
-        crate::palette::CUSTOM_ACCENT_PRESET
-    );
-    assert_eq!(env_defaults.custom_accent_hex, "#E9B143");
-
-    // Seed a local album, then simulate an unmounted/unsynced folder scan (`folders_scanned = 0`).
-    let mut albums = HashMap::new();
-    albums.insert(
-        "geogaddi".to_string(),
-        DiscoveredAlbumRecord {
-            title: "Geogaddi".to_string(),
-            normalized_title: "geogaddi".to_string(),
-            release_year: Some(2002),
-            mb_release_group_id: None,
-            mb_album_id: None,
-            track_count: 23,
-            sample_path: "/music/Boards of Canada/Geogaddi/01.flac".to_string(),
-        },
-    );
-    let mut populated = ScanOutcome::default();
-    populated.summary.folders_scanned = 1;
-    populated.summary.audio_files_seen = 23;
-    populated.artists.insert(
-        "boards of canada".to_string(),
-        DiscoveredArtistRecord {
-            display_name: "Boards of Canada".to_string(),
-            normalized_name: "boards of canada".to_string(),
-            mbid: None,
-            track_count: 23,
-            albums,
-        },
-    );
-    db.apply_scan_outcome(&populated).unwrap();
+    let music = dir.join("music");
+    let album = music.join("Boards of Canada/Geogaddi");
+    std::fs::create_dir_all(&album).unwrap();
+    std::fs::write(album.join("01.flac"), b"placeholder").unwrap();
+    db.add_library_folder(music.to_str().unwrap()).unwrap();
+    let snapshot = db.prepare_library_scan().unwrap();
+    let populated =
+        scan_library_folders_with_options(&snapshot.folders, &snapshot.options, None, |_, _| {})
+            .unwrap();
+    db.apply_scan_outcome_checked(&populated, &snapshot, false, None)
+        .unwrap();
     assert_eq!(db.library_stats().unwrap().local_albums, 1);
+    let artist = db
+        .list_artists("Boards of Canada", None, false)
+        .unwrap()
+        .remove(0);
+    let (release_id, _, owned) = db
+        .upsert_discovered_release(&test_release(artist.id, "Geogaddi", "deezer"))
+        .unwrap();
+    assert!(owned);
 
-    let unmounted = ScanOutcome::default();
-    db.apply_scan_outcome(&unmounted).unwrap();
+    // A missing mount cannot produce a complete scan, and a synthetic empty
+    // outcome cannot be applied against the configured folder snapshot either.
+    std::fs::remove_dir_all(&music).unwrap();
+    let snapshot = db.prepare_library_scan().unwrap();
+    assert!(
+        scan_library_folders_with_options(&snapshot.folders, &snapshot.options, None, |_, _| {})
+            .is_err()
+    );
+    assert!(
+        db.apply_scan_outcome_checked(&ScanOutcome::default(), &snapshot, false, None)
+            .is_err()
+    );
+
+    // An empty mount point is also rejected unless the user confirms the change.
+    std::fs::create_dir_all(&music).unwrap();
+    let empty =
+        scan_library_folders_with_options(&snapshot.folders, &snapshot.options, None, |_, _| {})
+            .unwrap();
+    assert!(
+        db.apply_scan_outcome_checked(&empty, &snapshot, false, None)
+            .is_err()
+    );
     assert_eq!(db.library_stats().unwrap().local_albums, 1);
+    assert!(db.get_release(release_id).unwrap().unwrap().owned_locally);
 
     let report = crate::models::HeadlessReport {
         db_path: db_path.to_string_lossy().to_string(),
@@ -412,11 +410,114 @@ fn preserves_local_albums_on_unmounted_scan_and_completes_partial_settings_schem
         ..crate::models::HeadlessReport::default()
     };
     let json = report.to_json_pretty().unwrap();
-    assert!(json.contains("\"local_albums\": 1"));
-    assert!(!json.contains("\"scan\":"));
-    assert!(!json.contains("\"check\":"));
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(parsed["status"]["local_albums"], 1);
+    assert!(parsed.get("scan").is_none());
+    assert!(parsed.get("check").is_none());
 
-    let _ = std::fs::remove_dir_all(&dir);
+    db.apply_scan_outcome_checked(&empty, &snapshot, true, None)
+        .unwrap();
+    assert_eq!(db.library_stats().unwrap().local_albums, 0);
+    assert_eq!(
+        db.get_artist(artist.id).unwrap().unwrap().status,
+        ArtistStatus::Missing
+    );
+    assert!(!db.get_release(release_id).unwrap().unwrap().owned_locally);
+    drop(db);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn theme_env_defaults_apply_before_saved_settings() {
+    const CHILD: &str = "MISSNIX_THEME_DEFAULTS_TEST_CHILD";
+    if std::env::var_os(CHILD).is_some() {
+        let mut db = Database::open_in_memory().unwrap();
+        let defaults = db.load_settings().unwrap();
+        assert!(!defaults.dark_mode);
+        assert_eq!(defaults.accent_preset, crate::palette::CUSTOM_ACCENT_PRESET);
+        assert_eq!(defaults.custom_accent_hex, "#8A8079");
+
+        let mut saved = defaults;
+        saved.dark_mode = true;
+        saved.accent_preset = 2;
+        saved.custom_accent_hex = "#112233".to_string();
+        db.save_settings(&saved).unwrap();
+        let loaded = db.load_settings().unwrap();
+        assert!(loaded.dark_mode);
+        assert_eq!(loaded.accent_preset, 2);
+        assert_eq!(loaded.custom_accent_hex, "#112233");
+        return;
+    }
+
+    // Environment changes are confined to a child process so the other tests
+    // can safely run in parallel without sharing mutable process-wide state.
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "db::tests::theme_env_defaults_apply_before_saved_settings",
+            "--nocapture",
+        ])
+        .env(CHILD, "1")
+        .env("MISSNIX_DEFAULT_DARK_MODE", "false")
+        .env("MISSNIX_DEFAULT_ACCENT_HEX", "#8a8079")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "theme defaults subprocess failed:\n{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+}
+
+#[test]
+fn refuses_unsafe_partial_databases_without_modifying_them() {
+    let dir = unique_test_dir("partial_schema_refusal");
+    for (filename, extra_sql) in [
+        (
+            "extra.db",
+            "CREATE TABLE notes (text TEXT); INSERT INTO notes VALUES ('keep');",
+        ),
+        ("future.db", "PRAGMA user_version = 999;"),
+        ("other-app.db", "PRAGMA application_id = 123456;"),
+    ] {
+        let path = dir.join(filename);
+        let raw = Connection::open(&path).unwrap();
+        raw.execute_batch(
+            "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             INSERT INTO settings VALUES ('important', 'keep');",
+        )
+        .unwrap();
+        raw.execute_batch(extra_sql).unwrap();
+        drop(raw);
+
+        assert!(Database::open(&path).is_err(), "accepted {filename}");
+        let raw = Connection::open(&path).unwrap();
+        let value: String = raw
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'important'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(value, "keep");
+        let artists_tables: i64 = raw
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'artists'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(artists_tables, 0, "modified {filename}");
+        if filename == "extra.db" {
+            let note: String = raw
+                .query_row("SELECT text FROM notes", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(note, "keep");
+        }
+    }
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 fn unique_test_dir(label: &str) -> std::path::PathBuf {
