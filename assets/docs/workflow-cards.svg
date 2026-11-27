@@ -1,81 +1,79 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 268" width="920" height="268" role="img" aria-label="How MissNix Works and Custom Copper Themes">
   <defs>
     <linearGradient id="cardBg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#251a15"/>
-      <stop offset="100%" stop-color="#1b130f"/>
+      <stop offset="0%" stop-color="#201c1a"/>
+      <stop offset="100%" stop-color="#171413"/>
     </linearGradient>
     <linearGradient id="stripBg" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#221712"/>
-      <stop offset="50%" stop-color="#2b1c15"/>
-      <stop offset="100%" stop-color="#221712"/>
+      <stop offset="0%" stop-color="#1d1917"/>
+      <stop offset="50%" stop-color="#241e1c"/>
+      <stop offset="100%" stop-color="#1d1917"/>
     </linearGradient>
   </defs>
 
   <g font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
     <!-- Step 1 Card -->
     <g transform="translate(0, 0)">
-      <rect width="294" height="168" rx="18" fill="url(#cardBg)" stroke="#483329" stroke-width="1.2"/>
-      <rect x="20" y="20" width="36" height="36" rx="11" fill="#5c2208" stroke="#ffb596" stroke-opacity="0.4"/>
-      <text x="38" y="44" font-size="15" font-weight="800" fill="#ffdbcd" text-anchor="middle">01</text>
-      <text x="68" y="36" font-size="11" font-weight="700" fill="#ffb596" letter-spacing="0.6">LOCAL LIBRARY</text>
-      <text x="68" y="53" font-size="16" font-weight="800" fill="#f6e5de">Point at Your Music</text>
-      <text x="20" y="84" font-size="12.5" fill="#d4b9ad">Add your music folders once. MissNix</text>
-      <text x="20" y="103" font-size="12.5" fill="#d4b9ad">recognizes your album artists cleanly</text>
-      <text x="20" y="122" font-size="12.5" fill="#d4b9ad">and skips albums you already own</text>
-      <text x="20" y="141" font-size="12.5" fill="#d4b9ad">on disk automatically.</text>
+      <rect width="294" height="168" rx="18" fill="url(#cardBg)" stroke="#3e3633" stroke-width="1.2"/>
+      <rect x="20" y="20" width="36" height="36" rx="11" fill="#422c22" stroke="#dec2b7" stroke-opacity="0.4"/>
+      <text x="38" y="44" font-size="15" font-weight="800" fill="#f0e2dc" text-anchor="middle">01</text>
+      <text x="68" y="36" font-size="11" font-weight="700" fill="#dec2b7" letter-spacing="0.6">LOCAL LIBRARY</text>
+      <text x="68" y="53" font-size="16" font-weight="800" fill="#efe8e5">Point at Your Music</text>
+      <text x="20" y="84" font-size="12.5" fill="#c8beb9">Add your music folders once. MissNix</text>
+      <text x="20" y="103" font-size="12.5" fill="#c8beb9">recognizes your album artists cleanly</text>
+      <text x="20" y="122" font-size="12.5" fill="#c8beb9">and skips albums you already own</text>
+      <text x="20" y="141" font-size="12.5" fill="#c8beb9">on disk automatically.</text>
     </g>
 
     <!-- Step 2 Card -->
     <g transform="translate(313, 0)">
-      <rect width="294" height="168" rx="18" fill="url(#cardBg)" stroke="#483329" stroke-width="1.2"/>
-      <rect x="20" y="20" width="36" height="36" rx="11" fill="#5c2208" stroke="#ffb596" stroke-opacity="0.4"/>
-      <text x="38" y="44" font-size="15" font-weight="800" fill="#ffdbcd" text-anchor="middle">02</text>
-      <text x="68" y="36" font-size="11" font-weight="700" fill="#ffb596" letter-spacing="0.6">RELEASE RADAR</text>
-      <text x="68" y="53" font-size="16" font-weight="800" fill="#f6e5de">Catch Every Drop</text>
-      <text x="20" y="84" font-size="12.5" fill="#d4b9ad">Checks Deezer &amp; MusicBrainz for</text>
-      <text x="20" y="103" font-size="12.5" fill="#d4b9ad">brand-new and upcoming albums,</text>
-      <text x="20" y="122" font-size="12.5" fill="#d4b9ad">EPs, and singles — with zero</text>
-      <text x="20" y="141" font-size="12.5" fill="#d4b9ad">accounts or API keys required.</text>
+      <rect width="294" height="168" rx="18" fill="url(#cardBg)" stroke="#3e3633" stroke-width="1.2"/>
+      <rect x="20" y="20" width="36" height="36" rx="11" fill="#422c22" stroke="#dec2b7" stroke-opacity="0.4"/>
+      <text x="38" y="44" font-size="15" font-weight="800" fill="#f0e2dc" text-anchor="middle">02</text>
+      <text x="68" y="36" font-size="11" font-weight="700" fill="#dec2b7" letter-spacing="0.6">RELEASE RADAR</text>
+      <text x="68" y="53" font-size="16" font-weight="800" fill="#efe8e5">Catch Every Drop</text>
+      <text x="20" y="84" font-size="12.5" fill="#c8beb9">Checks Deezer &amp; MusicBrainz for</text>
+      <text x="20" y="103" font-size="12.5" fill="#c8beb9">brand-new and upcoming albums,</text>
+      <text x="20" y="122" font-size="12.5" fill="#c8beb9">EPs, and singles — with zero</text>
+      <text x="20" y="141" font-size="12.5" fill="#c8beb9">accounts or API keys required.</text>
     </g>
 
     <!-- Step 3 Card -->
     <g transform="translate(626, 0)">
-      <rect width="294" height="168" rx="18" fill="url(#cardBg)" stroke="#483329" stroke-width="1.2"/>
-      <rect x="20" y="20" width="36" height="36" rx="11" fill="#5c2208" stroke="#ffb596" stroke-opacity="0.4"/>
-      <text x="38" y="44" font-size="15" font-weight="800" fill="#ffdbcd" text-anchor="middle">03</text>
-      <text x="68" y="36" font-size="11" font-weight="700" fill="#ffb596" letter-spacing="0.6">LISTEN &amp; CURATE</text>
-      <text x="68" y="53" font-size="16" font-weight="800" fill="#f6e5de">Preview Instantly</text>
-      <text x="20" y="84" font-size="12.5" fill="#d4b9ad">Play 30-second track previews right</text>
-      <text x="20" y="103" font-size="12.5" fill="#d4b9ad">inside the app, mark releases seen,</text>
-      <text x="20" y="122" font-size="12.5" fill="#d4b9ad">or mute noisy artists in a single</text>
-      <text x="20" y="141" font-size="12.5" fill="#d4b9ad">click from the side drawer.</text>
+      <rect width="294" height="168" rx="18" fill="url(#cardBg)" stroke="#3e3633" stroke-width="1.2"/>
+      <rect x="20" y="20" width="36" height="36" rx="11" fill="#422c22" stroke="#dec2b7" stroke-opacity="0.4"/>
+      <text x="38" y="44" font-size="15" font-weight="800" fill="#f0e2dc" text-anchor="middle">03</text>
+      <text x="68" y="36" font-size="11" font-weight="700" fill="#dec2b7" letter-spacing="0.6">LISTEN &amp; CURATE</text>
+      <text x="68" y="53" font-size="16" font-weight="800" fill="#efe8e5">Preview Instantly</text>
+      <text x="20" y="84" font-size="12.5" fill="#c8beb9">Play 30-second track previews right</text>
+      <text x="20" y="103" font-size="12.5" fill="#c8beb9">inside the app, mark releases seen,</text>
+      <text x="20" y="122" font-size="12.5" fill="#c8beb9">or mute noisy artists in a single</text>
+      <text x="20" y="141" font-size="12.5" fill="#c8beb9">click from the side drawer.</text>
     </g>
 
     <!-- Personalization & Theme Showcase Strip (Copper Highlighted) -->
     <g transform="translate(0, 186)">
-      <rect width="920" height="82" rx="18" fill="url(#stripBg)" stroke="#4d362b" stroke-width="1.2"/>
-      <text x="24" y="34" font-size="14" font-weight="800" fill="#f6e5de">Tailored to Your Desktop</text>
-      <text x="24" y="55" font-size="12" fill="#c7aca0">Dark &amp; Light modes · Crisp 90%–200% HiDPI scaling · 7 curated themes + any #RRGGBB accent</text>
+      <rect width="920" height="82" rx="18" fill="url(#stripBg)" stroke="#423a36" stroke-width="1.2"/>
+      <text x="24" y="34" font-size="14" font-weight="800" fill="#efe8e5">Tailored to Your Desktop</text>
+      <text x="24" y="55" font-size="12" fill="#bbb1ac">Dark &amp; Light · 90%–200% scaling · Custom accents</text>
 
       <!-- Theme Swatch Pills on Right -->
       <g transform="translate(546, 23)" font-size="11" font-weight="700">
         <!-- Active Copper Pill -->
-        <rect x="0" y="0" width="96" height="36" rx="18" fill="#5c2208" stroke="#ffb596" stroke-width="1.6"/>
-        <circle cx="19" cy="18" r="7" fill="#ea6c34" stroke="#ffdbcd" stroke-width="1.2"/>
-        <text x="34" y="22" fill="#ffdbcd">Copper</text>
+        <rect x="0" y="0" width="96" height="36" rx="18" fill="#422c22" stroke="#dec2b7" stroke-width="1.6"/>
+        <circle cx="19" cy="18" r="7" fill="#b2826c" stroke="#f0e2dc" stroke-width="1.2"/>
+        <text x="34" y="22" fill="#f0e2dc">Copper</text>
 
         <!-- Other Swatch Dots -->
         <g transform="translate(110, 4)">
-          <rect x="0" y="0" width="250" height="28" rx="14" fill="#18110e" stroke="#3c2a22"/>
-          <circle cx="22" cy="14" r="6.5" fill="#c6b8ff"/>
-          <circle cx="46" cy="14" r="6.5" fill="#76d0ff"/>
-          <circle cx="70" cy="14" r="6.5" fill="#6ddeac"/>
-          <circle cx="94" cy="14" r="6.5" fill="#fdb354"/>
-          <circle cx="118" cy="14" r="6.5" fill="#ffa9ad"/>
+          <rect x="0" y="0" width="230" height="28" rx="14" fill="#151211" stroke="#342d2a"/>
+          <circle cx="22" cy="14" r="6.5" fill="#d3cee9"/>
+          <circle cx="46" cy="14" r="6.5" fill="#a0c3d5"/>
+          <circle cx="70" cy="14" r="6.5" fill="#90bba8"/>
+          <circle cx="94" cy="14" r="6.5" fill="#c9ac88"/>
+          <circle cx="118" cy="14" r="6.5" fill="#e4c4c5"/>
           <circle cx="142" cy="14" r="6.5" fill="#c4c4c4"/>
-          <text x="162" y="18" font-size="10.5" font-weight="600" fill="#dec4b9">+ #HEX</text>
-          <rect x="208" y="6" width="32" height="16" rx="8" fill="#ea6c34" fill-opacity="0.25" stroke="#ea6c34"/>
-          <text x="224" y="17" font-size="9" font-weight="700" fill="#ffb596" text-anchor="middle">200%</text>
+          <text x="162" y="18" font-size="10.5" font-weight="600" fill="#d3c9c4">+ #HEX</text>
         </g>
       </g>
     </g>

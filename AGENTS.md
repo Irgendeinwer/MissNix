@@ -78,7 +78,7 @@ MissNix/
 ├── assets/
 │   ├── missnix.svg                   # Desktop launcher icon (hicolor/scalable/apps/missnix.svg)
 │   ├── icons/*.svg                   # Monochrome #FFFFFF vector icons tinted via Slint Image.colorize
-│   └── docs/*.svg                    # Sunset Copper README banner, UI preview, and workflow cards
+│   └── docs/                         # Muted README artwork and paths for real app screenshots
 └── .github/workflows/
     ├── ci.yml                        # Cargo + Determinate Nix Flake CI with Magic Nix Cache & rust-cache
     └── release.yml                   # Immutable SLSA-attested AppImage + tar.gz GitHub Release pipeline

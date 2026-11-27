@@ -5,18 +5,29 @@
 <br />
 
 [![CI](https://github.com/Irgendeinwer/MissNix/actions/workflows/ci.yml/badge.svg)](https://github.com/Irgendeinwer/MissNix/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/Irgendeinwer/MissNix?include_prereleases&label=release&color=ea6c34)](https://github.com/Irgendeinwer/MissNix/releases)
-[![Nix Flake](https://img.shields.io/badge/Nix-Flake-5277C3?logo=nixos&logoColor=white&labelColor=24345c)](flake.nix)
-[![Linux](https://img.shields.io/badge/Linux-AppImage%20%7C%20tar.gz-ea6c34?logo=linux&logoColor=white)](https://github.com/Irgendeinwer/MissNix/releases)
-[![License: MIT](https://img.shields.io/badge/License-MIT-d97706)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/Irgendeinwer/MissNix?include_prereleases&label=release&color=806354)](https://github.com/Irgendeinwer/MissNix/releases)
+[![Nix Flake](https://img.shields.io/badge/Nix-Flake-70584d?logo=nixos&logoColor=e9dfd9&labelColor=292320)](flake.nix)
+[![Linux](https://img.shields.io/badge/Linux-AppImage%20%7C%20tar.gz-806354?logo=linux&logoColor=white)](https://github.com/Irgendeinwer/MissNix/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-6f655b)](LICENSE)
 
 </div>
 
 **MissNix** scans your local music folders, builds a list of the artists in your library, and checks **Deezer** and **MusicBrainz** for new and upcoming albums, EPs, and singles. No accounts, subscriptions, or API keys required.
 
 <div align="center">
-  <img src="assets/docs/ui-preview.svg" alt="MissNix Desktop Interface in Sunset Copper Theme" width="100%" />
+  <img src="assets/docs/ui-preview.svg" alt="Illustrated MissNix Release Radar concept using sample data" width="100%" />
+  <p><sub>Concept illustration, not an app screenshot. See the <a href="#screenshots">screenshot capture instructions</a>.</sub></p>
 </div>
+
+<!-- Once all three PNGs listed under Screenshots exist, remove the illustration
+     above and uncomment the gallery below. -->
+<!--
+<div align="center">
+  <img src="assets/docs/screenshots/radar.png" alt="Release Radar with the release grid and details drawer" width="100%" />
+  <img src="assets/docs/screenshots/artists.png" alt="Tracked Artists list and artist details" width="49%" />
+  <img src="assets/docs/screenshots/settings.png" alt="Library and Settings appearance controls" width="49%" />
+</div>
+-->
 
 <br />
 
@@ -32,8 +43,31 @@
 - **Artist tag cleanup:** Splits collaboration credits into individual artists without breaking names like `Tyler, The Creator`, `Black Country, New Road`, or `AC/DC`. You can also mute or hide any artist in one click.
 - **Release radar:** Shows new, unread, and upcoming releases in a cover grid with search and filters for albums, EPs, and singles.
 - **30-second track previews:** Play track previews from the release drawer or docked mini-player without leaving the app.
-- **Themes and scaling:** Switch between dark and light modes, 7 built-in color palettes (including Copper), custom `#RRGGBB` accent colors, and adjustable UI scaling.
+- **Themes and scaling:** Choose dark or light mode, 7 built-in palettes (including Copper), or a custom `#RRGGBB` accent seed, including muted colors. Accent and swatch lightness are adjusted for readability; the settings offer `90%`–`200%` UI scaling.
 - **Headless CLI:** Run scans, check for new drops, emit JSON status output, and send desktop notifications from a terminal or systemd timer.
+
+---
+
+## Screenshots
+
+The gallery in this README is prepared for three real app captures.
+
+<details>
+<summary>Capture instructions and file paths</summary>
+
+1. Run MissNix, add a music folder under **Library & Settings**, then use **Scan Music Folders** and **Check Releases**. Wait for the scan and check to finish so the views contain data.
+2. Set the app scale to 100% and resize the window to approximately 1400 × 880. Capture the application window without the surrounding desktop; use a consistent theme and size for all three images. Use music and cover art you can share, and avoid exposing private folder paths or other personal information.
+3. Save PNG files at these paths relative to the repository root:
+
+   | File | What to capture |
+   | :--- | :--- |
+   | `assets/docs/screenshots/radar.png` | **Release Radar** with a populated release grid and one release's details drawer open; the preview player is optional. |
+   | `assets/docs/screenshots/artists.png` | **Tracked Artists** with a populated list and an artist's details drawer open. |
+   | `assets/docs/screenshots/settings.png` | **Library & Settings**, scrolled to show the appearance card, theme swatches, and custom hex input (for example `#8A8079`). Do not show private folder paths. |
+
+4. Once all three files exist, if the illustration is still visible, remove its block from `README.md` and uncomment the ready-made screenshot gallery immediately below it. Until then the illustration stays visible and there are no broken image links.
+
+</details>
 
 ---
 
