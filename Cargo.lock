@@ -2901,7 +2901,7 @@ dependencies = [
 
 [[package]]
 name = "missnix"
-version = "1.1.2"
+version = "1.2.0"
 dependencies = [
  "image",
  "libc",
@@ -2915,7 +2915,7 @@ dependencies = [
 
 [[package]]
 name = "missnix-core"
-version = "1.1.2"
+version = "1.2.0"
 dependencies = [
  "dirs",
  "lofty",
