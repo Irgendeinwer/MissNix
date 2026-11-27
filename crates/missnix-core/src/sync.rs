@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -8,7 +9,7 @@ use crate::error::{CoreError, CoreResult};
 use crate::models::{
     AppSettings, Artist, ProgressEvent, ProviderMode, Release, ReleaseTrack, SyncSummary,
 };
-use crate::normalize::{days_ago_iso_utc, normalize_artist_name};
+use crate::normalize::days_ago_iso_utc;
 use crate::providers::ArtistSearchCandidate;
 use crate::providers::deezer::DeezerClient;
 use crate::providers::musicbrainz::MusicBrainzClient;
@@ -19,6 +20,7 @@ pub struct AppPaths {
     pub cover_cache_dir: PathBuf,
     pub avatar_cache_dir: PathBuf,
     pub preview_cache_dir: PathBuf,
+    cache_base_dir: PathBuf,
 }
 
 impl AppPaths {
@@ -40,13 +42,65 @@ impl AppPaths {
                 .join("missnix")
         };
 
-        Self {
-            db_path,
-            cover_cache_dir: base_cache.join("covers"),
-            avatar_cache_dir: base_cache.join("avatars"),
-            preview_cache_dir: base_cache.join("previews"),
-        }
+        let mut paths = Self {
+            db_path: PathBuf::new(),
+            cover_cache_dir: PathBuf::new(),
+            avatar_cache_dir: PathBuf::new(),
+            preview_cache_dir: PathBuf::new(),
+            cache_base_dir: base_cache,
+        };
+        paths.set_database_path(db_path);
+        paths
     }
+
+    /// Row IDs are database-local, so cache paths must be database-local too.
+    /// Call this instead of changing `db_path` directly when using `--db`.
+    pub fn set_database_path(&mut self, db_path: PathBuf) {
+        let identity = absolute_database_path(&db_path);
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        identity.hash(&mut hasher);
+        let namespace = self
+            .cache_base_dir
+            .join(format!("db-{:016x}", hasher.finish()));
+        self.db_path = db_path;
+        self.cover_cache_dir = namespace.join("covers");
+        self.avatar_cache_dir = namespace.join("avatars");
+        self.preview_cache_dir = namespace.join("previews");
+    }
+}
+
+fn absolute_database_path(path: &Path) -> PathBuf {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(path)
+    };
+    // Canonicalize the deepest existing ancestor so the cache namespace is the
+    // same before and after a new database (or its parent directory) is created.
+    let mut cursor = absolute.as_path();
+    let mut missing = Vec::new();
+    while !cursor.exists() {
+        let Some(name) = cursor.file_name() else {
+            break;
+        };
+        missing.push(name.to_os_string());
+        let Some(parent) = cursor.parent() else { break };
+        cursor = parent;
+    }
+    let mut resolved = fs::canonicalize(cursor).unwrap_or_else(|_| cursor.to_path_buf());
+    for name in missing.into_iter().rev() {
+        resolved.push(name);
+    }
+    resolved
+}
+
+/// Results from each provider stay separate: matching names do not prove identity.
+#[derive(Debug, Default)]
+pub struct ArtistSearchResults {
+    pub candidates: Vec<ArtistSearchCandidate>,
+    pub warnings: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -120,9 +174,14 @@ impl SyncEngine {
                 Ok(artist_stats) => {
                     consecutive_network_errors = 0;
                     summary.artists_checked += 1;
+                    summary.artists_partial += artist_stats.artists_partial;
                     summary.new_releases_added += artist_stats.new_releases_added;
                     summary.releases_updated += artist_stats.releases_updated;
                     summary.owned_deduplicated += artist_stats.owned_deduplicated;
+                    summary.offline_or_rate_limited |= artist_stats.offline_or_rate_limited;
+                    if let Some(error) = artist_stats.last_error {
+                        summary.last_error = Some(format!("{}: {error}", artist.name));
+                    }
                 }
                 Err(CoreError::Cancelled) => return Err(CoreError::Cancelled),
                 Err(err) => {
@@ -139,6 +198,8 @@ impl SyncEngine {
                         if consecutive_network_errors >= 3 {
                             break;
                         }
+                    } else {
+                        consecutive_network_errors = 0;
                     }
                 }
             }
@@ -171,6 +232,7 @@ impl SyncEngine {
 
         let use_deezer = settings.provider_mode != ProviderMode::MusicBrainzOnly;
         let use_mb = settings.provider_mode != ProviderMode::DeezerOnly;
+        let mut provider_errors: Vec<CoreError> = Vec::new();
 
         // 1. If we already have a MusicBrainz Artist ID (e.g. from local FLAC tags!) and still
         //    lack a Deezer ID or disambiguation, query MusicBrainz `url-rels` for exact linking!
@@ -212,9 +274,11 @@ impl SyncEngine {
                     }
                     links_changed = true;
                 }
-                Ok(None) => {}
-                Err(e) if !use_mb => return Err(e),
-                Err(_) => {}
+                Ok(None) => provider_errors.push(CoreError::Validation(
+                    "Deezer artist not found or ambiguous; select an artist or set its ID."
+                        .to_string(),
+                )),
+                Err(e) => provider_errors.push(e),
             }
         }
 
@@ -232,9 +296,11 @@ impl SyncEngine {
                     }
                     links_changed = true;
                 }
-                Ok(None) => {}
-                Err(e) if !use_deezer && deezer_id.is_none() => return Err(e),
-                Err(_) => {}
+                Ok(None) => provider_errors.push(CoreError::Validation(
+                    "MusicBrainz artist not found or ambiguous; select an artist or set its ID."
+                        .to_string(),
+                )),
+                Err(e) => provider_errors.push(e),
             }
         }
 
@@ -250,7 +316,6 @@ impl SyncEngine {
         }
 
         let mut any_provider_succeeded = false;
-        let mut last_err: Option<CoreError> = None;
 
         // 4. Fetch Deezer releases
         if use_deezer && let Some(dz_id) = deezer_id {
@@ -279,7 +344,7 @@ impl SyncEngine {
                     }
                 }
                 Err(e) => {
-                    last_err = Some(e);
+                    provider_errors.push(e);
                 }
             }
         }
@@ -311,16 +376,48 @@ impl SyncEngine {
                     }
                 }
                 Err(e) => {
-                    last_err = Some(e);
+                    provider_errors.push(e);
                 }
             }
         }
 
-        if !any_provider_succeeded && let Some(err) = last_err {
-            return Err(err);
+        if !any_provider_succeeded {
+            // Prefer reporting a network/rate-limit failure so the outer circuit
+            // breaker still works when another provider merely has no match.
+            let network_error = provider_errors.iter().position(|err| {
+                matches!(
+                    err,
+                    CoreError::Network { .. } | CoreError::RateLimited { .. }
+                )
+            });
+            return Err(match network_error {
+                Some(index) => provider_errors.remove(index),
+                None => provider_errors.pop().unwrap_or_else(|| {
+                    CoreError::Validation("No provider could check this artist.".to_string())
+                }),
+            });
         }
 
-        db.mark_artist_checked(artist.id)?;
+        if provider_errors.is_empty() {
+            db.mark_artist_checked(artist.id)?;
+        } else {
+            // Preserve successful results, but do not claim a full check or advance
+            // the last-checked timestamp when an enabled provider failed.
+            stats.artists_partial = 1;
+            stats.offline_or_rate_limited = provider_errors.iter().any(|err| {
+                matches!(
+                    err,
+                    CoreError::Network { .. } | CoreError::RateLimited { .. }
+                )
+            });
+            stats.last_error = Some(
+                provider_errors
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            );
+        }
         Ok(stats)
     }
 
@@ -332,7 +429,8 @@ impl SyncEngine {
     ) -> CoreResult<Option<PathBuf>> {
         if let Some(ref existing) = release.cover_local_path {
             let p = PathBuf::from(existing);
-            if p.is_file() {
+            // Ignore legacy shared-cache paths, which may contain another DB's row ID.
+            if p.starts_with(&self.cover_cache_dir) && p.is_file() {
                 return Ok(Some(p));
             }
         }
@@ -482,41 +580,45 @@ impl SyncEngine {
         Ok(Vec::new())
     }
 
-    /// Search Deezer and MusicBrainz for manual artist addition, merging matching entries.
+    /// Search providers independently. Same-name results are not merged without
+    /// a verified cross-provider link; either one may be a different person.
     pub fn search_external_artists(
         &self,
         query: &str,
         mode: ProviderMode,
-    ) -> CoreResult<Vec<ArtistSearchCandidate>> {
-        let mut results: Vec<ArtistSearchCandidate> = Vec::new();
+    ) -> CoreResult<ArtistSearchResults> {
+        let mut result = ArtistSearchResults::default();
+        let mut succeeded = false;
+        let mut last_error = None;
 
-        if mode != ProviderMode::MusicBrainzOnly
-            && let Ok(dz) = self.deezer.search_artists(query, 8)
-        {
-            results.extend(dz);
-        }
-
-        if mode != ProviderMode::DeezerOnly
-            && let Ok(mb) = self.musicbrainz.search_artists(query, 6)
-        {
-            for m in mb {
-                let m_norm = normalize_artist_name(&m.name);
-                if let Some(existing) = results
-                    .iter_mut()
-                    .find(|r| r.mbid.is_none() && normalize_artist_name(&r.name) == m_norm)
-                {
-                    existing.mbid = m.mbid;
-                    if m.disambiguation.is_some() {
-                        existing.disambiguation = m.disambiguation;
-                    }
-                    existing.source = "deezer+musicbrainz";
-                } else {
-                    results.push(m);
+        if mode != ProviderMode::MusicBrainzOnly {
+            match self.deezer.search_artists(query, 8) {
+                Ok(candidates) => {
+                    succeeded = true;
+                    result.candidates.extend(candidates);
+                }
+                Err(err) => {
+                    result.warnings.push(err.to_string());
+                    last_error = Some(err);
                 }
             }
         }
-
-        Ok(results)
+        if mode != ProviderMode::DeezerOnly {
+            match self.musicbrainz.search_artists(query, 6) {
+                Ok(candidates) => {
+                    succeeded = true;
+                    result.candidates.extend(candidates);
+                }
+                Err(err) => {
+                    result.warnings.push(err.to_string());
+                    last_error = Some(err);
+                }
+            }
+        }
+        if !succeeded && let Some(error) = last_error {
+            return Err(error);
+        }
+        Ok(result)
     }
 }
 
@@ -729,5 +831,180 @@ mod tests {
         assert_eq!(feed[1].release_type, ReleaseType::Ep);
         assert_eq!(feed[1].track_count, 5);
         assert_eq!(feed[1].provider_source, "deezer+musicbrainz");
+    }
+
+    #[test]
+    fn offline_providers_are_reported_and_do_not_mark_artist_checked() {
+        let base = spawn_mock_http_server(HashMap::new());
+        let engine = SyncEngine::with_clients(
+            DeezerClient::with_base_url(&base, Duration::from_millis(1)),
+            MusicBrainzClient::with_base_urls(
+                &format!("{base}/ws/2"),
+                &base,
+                Duration::from_millis(1),
+            ),
+            std::env::temp_dir().join("missnix_offline_covers"),
+        );
+        let mut db = Database::open_in_memory().unwrap();
+        let artist = db
+            .add_manual_artist("Offline", None, None, None, None, None)
+            .unwrap();
+        let summary = engine
+            .sync_artists(
+                &mut db,
+                std::slice::from_ref(&artist),
+                &AppSettings::default(),
+                None,
+                |_| {},
+            )
+            .unwrap();
+        assert_eq!(summary.artists_checked, 0);
+        assert_eq!(summary.artists_failed, 1);
+        assert!(summary.offline_or_rate_limited);
+        assert!(summary.last_error.is_some());
+        assert_eq!(
+            db.get_artist(artist.id).unwrap().unwrap().last_checked_at,
+            None
+        );
+        assert!(
+            engine
+                .search_external_artists("Offline", ProviderMode::DeezerAndMusicBrainz)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn partial_provider_success_is_reported_without_a_full_check_timestamp() {
+        let mut routes = HashMap::new();
+        routes.insert(
+            "/search/artist?q=Partial&limit=10".to_string(),
+            r#"{"data":[{"id":8,"name":"Partial"}]}"#.to_string(),
+        );
+        routes.insert("/artist/8/albums?limit=100".to_string(),
+            r#"{"data":[{"id":81,"title":"A new album","release_date":"2026-01-01","record_type":"album"}]}"#.to_string());
+        let base = spawn_mock_http_server(routes);
+        let engine = SyncEngine::with_clients(
+            DeezerClient::with_base_url(&base, Duration::from_millis(1)),
+            MusicBrainzClient::with_base_urls(
+                &format!("{base}/ws/2"),
+                &base,
+                Duration::from_millis(1),
+            ),
+            std::env::temp_dir().join("missnix_partial_covers"),
+        );
+        let mut db = Database::open_in_memory().unwrap();
+        let artist = db
+            .add_manual_artist("Partial", None, None, None, None, None)
+            .unwrap();
+        let settings = AppSettings {
+            lookback_days: 0,
+            ..AppSettings::default()
+        };
+        let summary = engine
+            .sync_artists(
+                &mut db,
+                std::slice::from_ref(&artist),
+                &settings,
+                None,
+                |_| {},
+            )
+            .unwrap();
+        assert_eq!(summary.artists_checked, 1);
+        assert_eq!(summary.artists_partial, 1);
+        assert_eq!(summary.artists_failed, 0);
+        assert_eq!(summary.new_releases_added, 1);
+        assert!(
+            summary
+                .last_error
+                .as_deref()
+                .unwrap()
+                .contains("musicbrainz")
+        );
+        assert_eq!(
+            db.get_artist(artist.id).unwrap().unwrap().last_checked_at,
+            None
+        );
+    }
+
+    #[test]
+    fn ambiguous_names_are_not_automatically_linked_or_cross_provider_merged() {
+        let mut routes = HashMap::new();
+        let deezer = r#"{"data":[{"id":1,"name":"Same","nb_fan":1000},{"id":2,"name":"Same","nb_fan":500}]}"#.to_string();
+        let mb = r#"{"artists":[{"id":"11111111-1111-1111-1111-111111111111","name":"Same"},{"id":"22222222-2222-2222-2222-222222222222","name":"Same"}]}"#.to_string();
+        routes.insert("/search/artist?q=Same&limit=10".to_string(), deezer.clone());
+        routes.insert("/search/artist?q=Same&limit=8".to_string(), deezer);
+        routes.insert(
+            "/ws/2/artist?query=artist%3A%22Same%22&limit=8&fmt=json".to_string(),
+            mb.clone(),
+        );
+        routes.insert(
+            "/ws/2/artist?query=artist%3A%22Same%22&limit=6&fmt=json".to_string(),
+            mb,
+        );
+        for id in [1, 2] {
+            routes.insert(
+                format!("/artist/{id}/albums?limit=100"),
+                format!(r#"{{"data":[{{"id":{id},"title":"Shared Album"}}]}}"#),
+            );
+        }
+        let base = spawn_mock_http_server(routes);
+        let dz = DeezerClient::with_base_url(&base, Duration::from_millis(1));
+        let mb = MusicBrainzClient::with_base_urls(
+            &format!("{base}/ws/2"),
+            &base,
+            Duration::from_millis(1),
+        );
+        assert!(
+            dz.resolve_artist_smart("Same", &HashSet::new())
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            dz.resolve_artist_smart("Same", &HashSet::from(["shared album".to_string()]))
+                .unwrap()
+                .is_none()
+        );
+        assert!(mb.resolve_artist_by_name("Same").unwrap().is_none());
+        let engine =
+            SyncEngine::with_clients(dz, mb, std::env::temp_dir().join("missnix_search_covers"));
+        let result = engine
+            .search_external_artists("Same", ProviderMode::DeezerAndMusicBrainz)
+            .unwrap();
+        assert_eq!(result.candidates.len(), 4);
+        assert!(result.warnings.is_empty());
+        assert!(
+            result
+                .candidates
+                .iter()
+                .all(|c| c.deezer_id.is_none() != c.mbid.is_none())
+        );
+    }
+
+    #[test]
+    fn caches_are_isolated_by_database_and_stable_before_database_creation() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "missnix_cache_test_{}_{}",
+            std::process::id(),
+            nanos
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut paths = AppPaths::resolve();
+        paths.cache_base_dir = dir.join("cache");
+        let db_a = dir.join("new/one.db");
+        paths.set_database_path(db_a.clone());
+        let before = paths.preview_cache_dir.clone();
+        let covers_a = paths.cover_cache_dir.clone();
+        std::fs::create_dir_all(db_a.parent().unwrap()).unwrap();
+        std::fs::write(&db_a, b"").unwrap();
+        paths.set_database_path(db_a);
+        assert_eq!(before, paths.preview_cache_dir);
+        paths.set_database_path(dir.join("new/two.db"));
+        assert_ne!(before, paths.preview_cache_dir);
+        assert_ne!(covers_a, paths.cover_cache_dir);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

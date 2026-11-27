@@ -399,12 +399,15 @@ export component InspectorDrawer inherits Rectangle {
                     TonalBadge {
                         label: root.selected-artist.status == "tracked" ? "TRACKED"
                              : root.selected-artist.status == "muted" ? "MUTED"
+                             : root.selected-artist.status == "missing" ? "NOT IN LIBRARY"
                              : "HIDDEN";
                         badge-bg: root.selected-artist.status == "tracked" ? Theme.primary-container
                                 : root.selected-artist.status == "muted" ? Theme.warning-container
+                                : root.selected-artist.status == "missing" ? Theme.surface-container-highest
                                 : Theme.error-container;
                         badge-fg: root.selected-artist.status == "tracked" ? Theme.on-primary-container
                                 : root.selected-artist.status == "muted" ? Theme.on-warning-container
+                                : root.selected-artist.status == "missing" ? Theme.on-surface-variant
                                 : Theme.on-error-container;
                     }
                 }
@@ -467,10 +470,13 @@ export component InspectorDrawer inherits Rectangle {
 
                     M3Button {
                         fill-width: true;
-                        variant: root.selected-artist.status == "ignored" ? "primary-tonal" : "danger";
+                        variant: root.selected-artist.status == "ignored" || root.selected-artist.status == "missing" ? "primary-tonal" : "danger";
                         has-icon: true;
-                        icon: @image-url("../../assets/icons/eye-off.svg");
-                        text: root.selected-artist.status == "ignored" ? "Restore Artist" : "Hide Artist";
+                        icon: root.selected-artist.status == "missing"
+                            ? @image-url("../../assets/icons/plus.svg")
+                            : @image-url("../../assets/icons/eye-off.svg");
+                        text: root.selected-artist.status == "missing" ? "Track Artist"
+                            : root.selected-artist.status == "ignored" ? "Restore Artist" : "Hide Artist";
                         clicked => { root.toggle-artist-ignore(root.selected-artist.id); }
                     }
                 }

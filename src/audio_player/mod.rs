@@ -428,6 +428,15 @@ fn load_and_decode_preview(
         req.release_id, req.disc_number, req.track_number
     );
 
+    // A signed URL may expire while the MP3 is already cached. Play cached
+    // audio immediately rather than waiting for a network refresh first.
+    let cached = paths.preview_cache_dir.join(format!("{cache_key}.mp3"));
+    if let Ok(bytes) = std::fs::read(cached)
+        && bytes.len() > 1024
+    {
+        return decode_mp3_bytes(&bytes);
+    }
+
     let mut target_url = req.preview_url.clone();
     if is_deezer_preview_url_expired(&target_url)
         && let Some(fresh) = refresh_single_track_url(&paths.db_path, engine, req)

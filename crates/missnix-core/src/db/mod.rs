@@ -1,13 +1,12 @@
 mod artists;
 mod folders;
 mod releases;
-mod salvage;
 mod schema;
 mod settings;
 #[cfg(test)]
 mod tests;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use rusqlite::Connection;
@@ -15,7 +14,7 @@ use rusqlite::Connection;
 use crate::error::{CoreError, CoreResult};
 use crate::models::{LibraryStats, ReleaseType};
 
-use self::salvage::{restore_salvaged_snapshot, salvage_legacy_snapshot};
+pub use self::folders::LibraryScanSnapshot;
 use self::schema::{
     CANONICAL_DDL, SCHEMA_VERSION, is_canonical_schema_valid, is_partial_canonical_schema_valid,
 };
@@ -73,82 +72,43 @@ impl Database {
 
     fn configure_and_migrate(&mut self, db_path: Option<&Path>) -> CoreResult<()> {
         self.conn.busy_timeout(Duration::from_millis(5000))?;
-        self.conn.execute_batch(
-            "
-            PRAGMA journal_mode = WAL;
-            PRAGMA synchronous = NORMAL;
-            ",
-        )?;
 
-        let existing_tables: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+        // Validate before changing journal mode or writing any schema. A path supplied via
+        // --db may be an unrelated SQLite database, and a newer/legacy schema is not safe
+        // to rebuild by guessing which tables or columns contain user data.
+        let version: i32 = self
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        let application_id: i64 = self
+            .conn
+            .query_row("PRAGMA application_id", [], |r| r.get(0))?;
+        let existing_objects: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'",
             [],
             |r| r.get(0),
         )?;
-
-        if existing_tables == 0 {
-            self.conn.execute_batch(CANONICAL_DDL)?;
-            self.conn.execute_batch(&format!(
-                "PRAGMA user_version = {SCHEMA_VERSION}; PRAGMA foreign_keys = ON;"
-            ))?;
-            return Ok(());
-        }
-
-        if is_canonical_schema_valid(&self.conn)? || is_partial_canonical_schema_valid(&self.conn)?
+        let empty = existing_objects == 0 && version == 0 && application_id == 0;
+        if !(0..=SCHEMA_VERSION).contains(&version)
+            || (!empty
+                && !is_canonical_schema_valid(&self.conn)?
+                && !is_partial_canonical_schema_valid(&self.conn)?)
         {
-            self.conn.execute_batch(CANONICAL_DDL)?;
-            self.conn.execute_batch(&format!(
-                "PRAGMA user_version = {SCHEMA_VERSION}; PRAGMA foreign_keys = ON;"
-            ))?;
-            return Ok(());
+            let database = db_path
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "in-memory database".to_string());
+            return Err(CoreError::Validation(format!(
+                "Unrecognized or newer database schema in {database}. No migration was performed; \
+                 use a compatible database or restore a backup."
+            )));
         }
 
-        self.salvage_and_rebuild_schema(db_path)?;
-        Ok(())
-    }
-
-    fn salvage_and_rebuild_schema(&mut self, db_path: Option<&Path>) -> CoreResult<()> {
-        let _ = self.conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
-        if let Some(path) = db_path.filter(|p| p.is_file()) {
-            let mut bak_os = path.as_os_str().to_os_string();
-            bak_os.push(".bak");
-            let bak_path = PathBuf::from(bak_os);
-            if !bak_path.exists() {
-                let _ = std::fs::copy(path, bak_path);
-            }
-        }
-
-        let snapshot = salvage_legacy_snapshot(&self.conn);
-
-        self.conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
-
-        let objects: Vec<(String, String)> = {
-            let mut stmt = self.conn.prepare(
-                "SELECT type, name FROM sqlite_master
-                 WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'",
-            )?;
-            let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
-            rows.collect::<Result<Vec<_>, _>>()?
-        };
-
+        self.conn
+            .execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")?;
         let tx = self.conn.transaction()?;
-        for (kind, name) in objects {
-            let kw = if kind.eq_ignore_ascii_case("view") {
-                "VIEW"
-            } else {
-                "TABLE"
-            };
-            let escaped = name.replace('"', "\"\"");
-            tx.execute_batch(&format!("DROP {kw} IF EXISTS \"{escaped}\";"))?;
-        }
-
         tx.execute_batch(CANONICAL_DDL)?;
-        restore_salvaged_snapshot(&tx, &snapshot)?;
+        tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         tx.commit()?;
-
-        self.conn.execute_batch(&format!(
-            "PRAGMA user_version = {SCHEMA_VERSION}; PRAGMA foreign_keys = ON;"
-        ))?;
+        self.conn.execute_batch("PRAGMA foreign_keys = ON;")?;
         Ok(())
     }
 
@@ -168,6 +128,11 @@ impl Database {
         )?;
         let ignored_artists: i64 = self.conn.query_row(
             "SELECT COUNT(*) FROM artists WHERE status = 'ignored'",
+            [],
+            |r| r.get(0),
+        )?;
+        let missing_artists: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM artists WHERE status = 'missing'",
             [],
             |r| r.get(0),
         )?;
@@ -192,6 +157,7 @@ impl Database {
             tracked_artists: tracked_artists as usize,
             muted_artists: muted_artists as usize,
             ignored_artists: ignored_artists as usize,
+            missing_artists: missing_artists as usize,
             local_albums: local_albums as usize,
             total_releases: total_releases as usize,
             unseen_releases: unseen_releases as usize,

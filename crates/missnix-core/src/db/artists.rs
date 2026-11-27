@@ -1,4 +1,6 @@
-use rusqlite::{OptionalExtension, ToSql, params, params_from_iter};
+use rusqlite::{
+    OptionalExtension, ToSql, Transaction, TransactionBehavior, params, params_from_iter,
+};
 
 use crate::error::{CoreError, CoreResult};
 use crate::models::{Artist, ArtistSource, ArtistStatus, LocalAlbum};
@@ -107,13 +109,39 @@ impl Database {
         let clean_avatar = avatar_url.map(str::trim).filter(|s| !s.is_empty());
         let clean_ext = external_url.map(str::trim).filter(|s| !s.is_empty());
 
-        self.conn.execute(
+        let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
+        let existing: Option<(Option<String>, Option<i64>)> = tx
+            .query_row(
+                "SELECT mbid, deezer_id FROM artists WHERE normalized_name = ?1",
+                params![norm],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        if let Some((old_mbid, old_deezer)) = existing {
+            let same_mb = clean_mbid.is_some() && clean_mbid == old_mbid.as_deref();
+            let same_dz = deezer_id.is_some() && deezer_id == old_deezer;
+            let has_old_id = old_mbid.is_some() || old_deezer.is_some();
+            let has_new_id = clean_mbid.is_some() || deezer_id.is_some();
+            let conflicting_mb = clean_mbid.is_some() && old_mbid.is_some() && !same_mb;
+            let conflicting_dz = deezer_id.is_some() && old_deezer.is_some() && !same_dz;
+            if conflicting_mb
+                || conflicting_dz
+                || (has_old_id && has_new_id && !same_mb && !same_dz)
+            {
+                return Err(CoreError::Validation(format!(
+                    "An artist named '{clean_name}' already has different provider IDs. \
+                     Edit that artist's IDs explicitly instead of merging by name."
+                )));
+            }
+        }
+        tx.execute(
             "INSERT INTO artists (
                 name, normalized_name, mbid, deezer_id, disambiguation,
                 avatar_url, external_url, status, source, created_at, updated_at
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'tracked', 'manual', ?8, ?8)
              ON CONFLICT(normalized_name) DO UPDATE SET
                 status = 'tracked',
+                source = 'manual',
                 mbid = COALESCE(?3, artists.mbid),
                 deezer_id = COALESCE(?4, artists.deezer_id),
                 disambiguation = COALESCE(?5, artists.disambiguation),
@@ -132,11 +160,12 @@ impl Database {
             ],
         )?;
 
-        let id: i64 = self.conn.query_row(
+        let id: i64 = tx.query_row(
             "SELECT id FROM artists WHERE normalized_name = ?1",
             params![norm],
             |r| r.get(0),
         )?;
+        tx.commit()?;
         self.get_artist(id)?.ok_or_else(|| {
             CoreError::Validation("Failed to load newly inserted artist".to_string())
         })
@@ -144,10 +173,16 @@ impl Database {
 
     pub fn set_artist_status(&self, artist_id: i64, status: ArtistStatus) -> CoreResult<()> {
         let now = now_rfc3339_utc();
-        self.conn.execute(
-            "UPDATE artists SET status = ?1, updated_at = ?2 WHERE id = ?3",
+        let updated = self.conn.execute(
+            "UPDATE artists SET
+                source = CASE WHEN ?1 = 'tracked' AND source = 'local' AND local_track_count = 0
+                              THEN 'manual' ELSE source END,
+                status = ?1, updated_at = ?2 WHERE id = ?3",
             params![status.as_str(), now, artist_id],
         )?;
+        if updated == 0 {
+            return Err(CoreError::Validation("Artist no longer exists".to_string()));
+        }
         Ok(())
     }
 

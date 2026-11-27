@@ -1,4 +1,7 @@
-use rusqlite::{OptionalExtension, ToSql, params, params_from_iter};
+use rusqlite::{
+    Connection, OptionalExtension, ToSql, Transaction, TransactionBehavior, params,
+    params_from_iter,
+};
 
 use crate::error::{CoreError, CoreResult};
 use crate::models::{FeedQuery, FeedSort, Release, ReleaseState, ReleaseTrack, ReleaseType};
@@ -23,17 +26,13 @@ impl Database {
             ));
         }
 
-        let owned_locally = self.is_release_owned_locally(
-            input.artist_id,
-            &norm_title,
-            input.mb_release_group_id.as_deref(),
-        )?;
+        // Serialize the match and update/insert across GUI and CLI connections.
+        let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
 
         // Match existing release by Deezer ID, MusicBrainz Release-Group ID, or (normalized_title, release_type)
-        let existing: Option<(i64, String)> = self
-            .conn
+        let existing: Option<(i64, String, String, Option<String>)> = tx
             .query_row(
-                "SELECT id, provider_source FROM releases
+                "SELECT id, provider_source, normalized_title, mb_release_group_id FROM releases
                  WHERE artist_id = ?1
                    AND (
                        (?2 IS NOT NULL AND deezer_album_id = ?2)
@@ -48,15 +47,29 @@ impl Database {
                     norm_title,
                     input.release_type.as_str()
                 ],
-                |r| Ok((r.get(0)?, r.get(1)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
             )
             .optional()?;
 
+        // Use the persisted release identity as well as the incoming provider's
+        // identity. Deezer updates normally omit a previously known MB group ID.
+        let owned_locally = release_owned_locally(
+            &tx,
+            input.artist_id,
+            existing
+                .as_ref()
+                .map_or(norm_title.as_str(), |row| row.2.as_str()),
+            input
+                .mb_release_group_id
+                .as_deref()
+                .or_else(|| existing.as_ref().and_then(|row| row.3.as_deref())),
+        )?;
         let now = now_rfc3339_utc();
 
-        if let Some((existing_id, existing_provider)) = existing {
+        let (release_id, inserted) = if let Some((existing_id, existing_provider, _, _)) = existing
+        {
             let merged_provider = merge_provider_labels(&existing_provider, &input.provider_source);
-            self.conn.execute(
+            tx.execute(
                 "UPDATE releases SET
                     release_date = CASE
                         WHEN (release_date = '' OR LENGTH(?1) > LENGTH(release_date)) AND ?1 != '' THEN ?1
@@ -64,7 +77,11 @@ impl Database {
                     END,
                     deezer_album_id = COALESCE(?2, deezer_album_id),
                     mb_release_group_id = COALESCE(?3, mb_release_group_id),
-                    cover_url = COALESCE(?4, cover_url),
+                    cover_local_path = CASE
+                        WHEN ?13 = 'deezer' AND ?4 IS NOT NULL AND COALESCE(cover_url, '') != ?4
+                        THEN NULL ELSE cover_local_path END,
+                    cover_url = CASE WHEN ?13 = 'deezer' AND ?4 IS NOT NULL THEN ?4
+                                     ELSE COALESCE(cover_url, ?4) END,
                     external_url = COALESCE(?5, external_url),
                     musicbrainz_url = COALESCE(?6, musicbrainz_url),
                     track_count = MAX(track_count, ?7),
@@ -85,12 +102,13 @@ impl Database {
                     i32::from(owned_locally),
                     merged_provider,
                     now,
-                    existing_id
+                    existing_id,
+                    input.provider_source
                 ],
             )?;
-            Ok((existing_id, false, owned_locally))
+            (existing_id, false)
         } else {
-            self.conn.execute(
+            tx.execute(
                 "INSERT INTO releases (
                     artist_id, title, normalized_title, release_type, release_date,
                     deezer_album_id, mb_release_group_id, cover_url, external_url,
@@ -115,8 +133,10 @@ impl Database {
                     now
                 ],
             )?;
-            Ok((self.conn.last_insert_rowid(), true, owned_locally))
-        }
+            (tx.last_insert_rowid(), true)
+        };
+        tx.commit()?;
+        Ok((release_id, inserted, owned_locally))
     }
 
     pub fn is_release_owned_locally(
@@ -125,21 +145,7 @@ impl Database {
         normalized_title: &str,
         mb_release_group_id: Option<&str>,
     ) -> CoreResult<bool> {
-        let found: Option<i32> = self
-            .conn
-            .query_row(
-                "SELECT 1 FROM local_albums
-                 WHERE artist_id = ?1
-                   AND (
-                       normalized_title = ?2
-                       OR (?3 IS NOT NULL AND mb_release_group_id = ?3)
-                   )
-                 LIMIT 1",
-                params![artist_id, normalized_title, mb_release_group_id],
-                |r| r.get(0),
-            )
-            .optional()?;
-        Ok(found.is_some())
+        release_owned_locally(&self.conn, artist_id, normalized_title, mb_release_group_id)
     }
 
     pub fn query_releases(&self, query: &FeedQuery) -> CoreResult<Vec<Release>> {
@@ -277,11 +283,33 @@ impl Database {
 
     pub fn set_release_state(&self, release_id: i64, state: ReleaseState) -> CoreResult<()> {
         let now = now_rfc3339_utc();
-        self.conn.execute(
+        let updated = self.conn.execute(
             "UPDATE releases SET state = ?1, updated_at = ?2 WHERE id = ?3",
             params![state.as_str(), now, release_id],
         )?;
+        if updated == 0 {
+            return Err(CoreError::Validation(
+                "Release no longer exists".to_string(),
+            ));
+        }
         Ok(())
+    }
+
+    /// Mark only the release IDs selected by the current feed filters. Already
+    /// seen/dismissed or concurrently deleted rows are left unchanged.
+    pub fn mark_releases_seen(&mut self, release_ids: &[i64]) -> CoreResult<usize> {
+        let tx = self.conn.transaction()?;
+        let now = now_rfc3339_utc();
+        let mut updated = 0;
+        for id in release_ids {
+            updated += tx.execute(
+                "UPDATE releases SET state = 'seen', updated_at = ?1
+                 WHERE id = ?2 AND state = 'unseen'",
+                params![now, id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(updated)
     }
 
     pub fn mark_all_releases_seen(&self, artist_id: Option<i64>) -> CoreResult<usize> {
@@ -373,6 +401,25 @@ impl Database {
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(CoreError::from)
     }
+}
+
+fn release_owned_locally(
+    conn: &Connection,
+    artist_id: i64,
+    normalized_title: &str,
+    mb_release_group_id: Option<&str>,
+) -> CoreResult<bool> {
+    let found: Option<i32> = conn
+        .query_row(
+            "SELECT 1 FROM local_albums
+             WHERE artist_id = ?1
+               AND (normalized_title = ?2 OR (?3 IS NOT NULL AND mb_release_group_id = ?3))
+             LIMIT 1",
+            params![artist_id, normalized_title, mb_release_group_id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(found.is_some())
 }
 
 fn map_release_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Release> {

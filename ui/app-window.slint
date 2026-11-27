@@ -39,12 +39,16 @@ export component AppWindow inherits Window {
     // 0 = Release Radar, 1 = Tracked Artists, 2 = Library & Settings
     in-out property <int> active-view: 0;
     in property <int> unseen-badge-count: 0;
+    in property <int> filtered-unseen-count: 0;
     in property <string> library-summary-text: "0 tracked artists\n0 local albums";
     in property <string> status-banner-text: "Ready";
     in property <bool> status-is-warning: false;
 
     // Background worker telemetry
     in property <bool> is-busy: false;
+    // Folder/scan-preference changes made during a task are reconciled afterwards.
+    in property <bool> scan-pending: false;
+    in property <int> search-request-id: 0;
     in property <bool> progress-indeterminate: false;
     in property <float> progress-fraction: 0.0;
     in property <string> busy-label: "";
@@ -302,7 +306,7 @@ export component AppWindow inherits Window {
                         toggle-artist-ignore(a0) => { root.toggle-artist-ignore(a0); }
                         toggle-artist-mute(a0) => { root.toggle-artist-mute(a0); }
                         toggle-release-seen(a0) => { root.toggle-release-seen(a0); }
-                        unseen-badge-count: root.unseen-badge-count;
+                        filtered-unseen-count: root.filtered-unseen-count;
                     }
 
                     artists-view := ArtistsView {

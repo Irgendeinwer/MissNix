@@ -1,11 +1,32 @@
-use rusqlite::params;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use rusqlite::{Connection, Transaction, TransactionBehavior, params};
 
 use crate::error::{CoreError, CoreResult};
 use crate::models::LibraryFolder;
 use crate::normalize::now_rfc3339_utc;
-use crate::scanner::ScanOutcome;
+use crate::scanner::{ScanOptions, ScanOutcome};
 
+use super::settings::{advance_scan_revision, load_settings_from_conn, scan_revision};
 use super::{Database, expand_tilde};
+
+/// A consistent view of the configured folders and scan preferences. Apply the
+/// resulting scan with this same snapshot to reject stale concurrent workers.
+#[derive(Debug, Clone)]
+pub struct LibraryScanSnapshot {
+    pub folders: Vec<PathBuf>,
+    pub options: ScanOptions,
+    folder_ids: Vec<(i64, String)>,
+    revision: i64,
+}
+
+fn enabled_folders(conn: &Connection) -> CoreResult<Vec<(i64, String)>> {
+    let mut stmt =
+        conn.prepare("SELECT id, path FROM library_folders WHERE enabled = 1 ORDER BY id")?;
+    let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(CoreError::from)
+}
 
 impl Database {
     pub fn add_library_folder(&self, raw_path: &str) -> CoreResult<LibraryFolder> {
@@ -22,27 +43,36 @@ impl Database {
         let path_str = canonical.to_string_lossy().to_string();
         let now = now_rfc3339_utc();
 
-        self.conn.execute(
+        let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
+        let changed = tx.execute(
             "INSERT INTO library_folders (path, enabled, added_at)
              VALUES (?1, 1, ?2)
-             ON CONFLICT(path) DO UPDATE SET enabled = 1",
+             ON CONFLICT(path) DO UPDATE SET enabled = 1 WHERE enabled != 1",
             params![path_str, now],
         )?;
-
-        let folder = self.conn.query_row(
+        if changed > 0 {
+            advance_scan_revision(&tx)?;
+        }
+        let folder = tx.query_row(
             "SELECT id, path, enabled, track_count, last_scanned_at, added_at
              FROM library_folders WHERE path = ?1",
             params![path_str],
             map_folder_row,
         )?;
+        tx.commit()?;
         Ok(folder)
     }
 
     pub fn remove_library_folder(&self, folder_id: i64) -> CoreResult<()> {
-        self.conn.execute(
+        let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
+        if tx.execute(
             "DELETE FROM library_folders WHERE id = ?1",
             params![folder_id],
-        )?;
+        )? > 0
+        {
+            advance_scan_revision(&tx)?;
+        }
+        tx.commit()?;
         Ok(())
     }
 
@@ -59,9 +89,94 @@ impl Database {
     // Applying Scan Outcome & Reconciling Local Ownership
     // -------------------------------------------------------------------------
 
+    pub fn prepare_library_scan(&self) -> CoreResult<LibraryScanSnapshot> {
+        let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Deferred)?;
+        let folder_ids = enabled_folders(&tx)?;
+        let folders = folder_ids
+            .iter()
+            .map(|(_, path)| PathBuf::from(path))
+            .collect();
+        let options = ScanOptions::from_settings(&load_settings_from_conn(&tx)?);
+        let revision = scan_revision(&tx)?;
+        tx.commit()?;
+        Ok(LibraryScanSnapshot {
+            folders,
+            options,
+            folder_ids,
+            revision,
+        })
+    }
+
+    /// Apply an outcome against the current configuration. Callers which scan the
+    /// filesystem should use `prepare_library_scan` and `apply_scan_outcome_checked`
+    /// instead, so changes made while the scan runs cannot be overwritten.
     pub fn apply_scan_outcome(&mut self, outcome: &ScanOutcome) -> CoreResult<()> {
+        let snapshot = self.prepare_library_scan()?;
+        // An unchecked empty outcome with no configured folders may indicate an
+        // unmounted or otherwise absent scan. Only the checked API can explicitly
+        // reconcile an intentionally empty folder configuration.
+        if snapshot.folders.is_empty()
+            && outcome.folder_track_counts.is_empty()
+            && outcome.artists.is_empty()
+            && outcome.summary.folders_scanned == 0
+            && outcome.summary.audio_files_seen == 0
+        {
+            return Ok(());
+        }
+        self.apply_scan_outcome_checked(outcome, &snapshot, false, None)
+    }
+
+    /// Apply a full, current scan atomically. An unexpectedly empty previously indexed
+    /// folder is rejected unless the user explicitly confirms it was emptied.
+    pub fn apply_scan_outcome_checked(
+        &mut self,
+        outcome: &ScanOutcome,
+        snapshot: &LibraryScanSnapshot,
+        allow_empty_folders: bool,
+        cancel_flag: Option<&AtomicBool>,
+    ) -> CoreResult<()> {
         let now = now_rfc3339_utc();
-        let tx = self.conn.transaction()?;
+        let tx = self
+            .conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if cancel_flag.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+            return Err(CoreError::Cancelled);
+        }
+        if scan_revision(&tx)? != snapshot.revision
+            || enabled_folders(&tx)? != snapshot.folder_ids
+            || ScanOptions::from_settings(&load_settings_from_conn(&tx)?) != snapshot.options
+        {
+            return Err(CoreError::Validation(
+                "Library folders or scan settings changed while scanning; scan again.".to_string(),
+            ));
+        }
+        if outcome.folder_track_counts.len() != snapshot.folders.len()
+            || snapshot
+                .folders
+                .iter()
+                .any(|path| !outcome.folder_track_counts.contains_key(path))
+        {
+            return Err(CoreError::Validation(
+                "Incomplete library scan; previous library data was not changed.".to_string(),
+            ));
+        }
+        if !allow_empty_folders {
+            for path in &snapshot.folders {
+                let previous_count: i64 = tx.query_row(
+                    "SELECT track_count FROM library_folders WHERE path = ?1 AND enabled = 1",
+                    params![path.to_string_lossy().to_string()],
+                    |r| r.get(0),
+                )?;
+                if previous_count > 0 && outcome.folder_track_counts[path] == 0 {
+                    return Err(CoreError::Validation(format!(
+                        "{} previously contained audio files but is now empty. \
+                         Reconnect the drive and scan again, or remove and re-add the folder \
+                         to confirm it was intentionally emptied. Library data was not changed.",
+                        path.display()
+                    )));
+                }
+            }
+        }
 
         for (folder_path, count) in &outcome.folder_track_counts {
             let p = folder_path.to_string_lossy().to_string();
@@ -73,19 +188,9 @@ impl Database {
             )?;
         }
 
-        // Guard against temporarily missing/unmounted folders (e.g. a background timer
-        // running before a NAS mount or Syncthing share is available) so neither
-        // `local_albums` nor `owned_locally` deduplication flags get wiped out.
-        let has_discovered_content = !outcome.artists.is_empty()
-            || (outcome.summary.folders_scanned > 0 && outcome.summary.audio_files_seen > 0);
-        if !has_discovered_content {
-            tx.commit()?;
-            return Ok(());
-        }
-
-        // Reset counts for local artists before re-applying full scan snapshot
+        // Manual artists can also have local files, so reset counts for every artist.
         tx.execute(
-            "UPDATE artists SET local_album_count = 0, local_track_count = 0 WHERE source = 'local'",
+            "UPDATE artists SET local_album_count = 0, local_track_count = 0",
             [],
         )?;
         tx.execute("DELETE FROM local_albums", [])?;
@@ -101,6 +206,7 @@ impl Database {
                  ) VALUES (?1, ?2, ?3, 'tracked', 'local', ?4, ?5, ?6, ?6)
                  ON CONFLICT(normalized_name) DO UPDATE SET
                     mbid = COALESCE(artists.mbid, excluded.mbid),
+                    status = CASE WHEN artists.status = 'missing' THEN 'tracked' ELSE artists.status END,
                     local_album_count = excluded.local_album_count,
                     local_track_count = excluded.local_track_count,
                     updated_at = excluded.updated_at",
@@ -146,20 +252,14 @@ impl Database {
             }
         }
 
-        // Prune stale `local` + `tracked` artists that no longer match any audio file
-        // (for instance, old fake combined collaboration rows like "Alligatoah, Jamal" or
-        // removed folders), while preserving manual artists and muted/ignored preferences.
-        // Guarded on `folders_scanned > 0 && audio_files_seen > 0` so an unmounted drive
-        // never wipes out a user's tracked catalog.
-        if outcome.summary.folders_scanned > 0 && outcome.summary.audio_files_seen > 0 {
-            tx.execute(
-                "DELETE FROM artists
-                 WHERE source = 'local'
-                   AND status = 'tracked'
-                   AND local_track_count = 0",
-                [],
-            )?;
-        }
+        // Never cascade-delete release history, tracklists, or user state just
+        // because a local artist disappeared. Retire it from the radar instead;
+        // it will resume tracking if a later scan finds it again.
+        tx.execute(
+            "UPDATE artists SET status = 'missing'
+             WHERE source = 'local' AND status = 'tracked' AND local_track_count = 0",
+            [],
+        )?;
 
         // Recompute `owned_locally` across all discovered releases immediately!
         tx.execute(
@@ -178,6 +278,10 @@ impl Database {
             [],
         )?;
 
+        advance_scan_revision(&tx)?;
+        if cancel_flag.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+            return Err(CoreError::Cancelled);
+        }
         tx.commit()?;
         Ok(())
     }

@@ -42,7 +42,7 @@ export component RadarView inherits VerticalLayout {
     callback toggle-artist-ignore(int);
     callback toggle-artist-mute(int);
     callback toggle-release-seen(int);
-    in property <int> unseen-badge-count;
+    in property <int> filtered-unseen-count;
 
     public function focus-search() {
         feed-search-input.focus-input();
@@ -141,8 +141,8 @@ export component RadarView inherits VerticalLayout {
                     variant: "primary-tonal";
                     has-icon: true;
                     icon: @image-url("../../assets/icons/done-all.svg");
-                    text: "Mark All Seen";
-                    enabled: root.unseen-badge-count > 0;
+                    text: "Mark Filtered Seen";
+                    enabled: root.filtered-unseen-count > 0;
                     clicked => { root.mark-all-seen(); }
                 }
             }
@@ -177,9 +177,7 @@ export component RadarView inherits VerticalLayout {
                             }
                         }
                         M3FilterChip {
-                            label: root.unseen-badge-count > 0
-                                ? "Unread (\{root.unseen-badge-count})"
-                                : "Unread";
+                            label: "Unread";
                             selected: root.feed-status-index == 1;
                             clicked => {
                                 root.feed-status-index = 1;

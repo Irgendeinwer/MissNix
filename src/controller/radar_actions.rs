@@ -1,7 +1,7 @@
 use std::sync::atomic::Ordering;
 
 use missnix_core::ReleaseState;
-use slint::{ComponentHandle, SharedString};
+use slint::{ComponentHandle, Model, SharedString};
 
 use crate::AppWindow;
 use crate::audio_player::PreviewRequest;
@@ -39,8 +39,12 @@ pub(super) fn wire_radar_and_preview_callbacks(app: &AppWindow, state: &SharedUi
 
     {
         let st = state.clone();
+        let weak = app.as_weak();
         app.on_cancel_background_task(move || {
             st.borrow().cancel_flag.store(true, Ordering::Relaxed);
+            if let Some(win) = weak.upgrade() {
+                win.set_scan_pending(false);
+            }
         });
     }
 
@@ -208,7 +212,11 @@ pub(super) fn wire_radar_and_preview_callbacks(app: &AppWindow, state: &SharedUi
                 } else {
                     ReleaseState::Unseen
                 };
-                let _ = guard.db.set_release_state(rel.id, next_state);
+                if let Err(err) = guard.db.set_release_state(rel.id, next_state) {
+                    win.set_status_is_warning(true);
+                    win.set_status_banner_text(format!("Could not update release: {err}").into());
+                    return;
+                }
                 refresh_folders_and_stats(&win, &guard);
                 refresh_feed(&win, &mut guard);
                 if win.get_selected_release_id() == rel_id
@@ -227,9 +235,14 @@ pub(super) fn wire_radar_and_preview_callbacks(app: &AppWindow, state: &SharedUi
         app.on_dismiss_release(move |rel_id| {
             let Some(win) = weak.upgrade() else { return };
             let mut guard = st.borrow_mut();
-            let _ = guard
+            if let Err(err) = guard
                 .db
-                .set_release_state(rel_id as i64, ReleaseState::Dismissed);
+                .set_release_state(rel_id as i64, ReleaseState::Dismissed)
+            {
+                win.set_status_is_warning(true);
+                win.set_status_banner_text(format!("Could not dismiss release: {err}").into());
+                return;
+            }
             if win.get_inspector_mode() == 1 && win.get_selected_release_id() == rel_id {
                 win.set_inspector_mode(0);
                 win.set_selected_release_id(0);
@@ -245,18 +258,29 @@ pub(super) fn wire_radar_and_preview_callbacks(app: &AppWindow, state: &SharedUi
         app.on_mark_all_seen(move || {
             let Some(win) = weak.upgrade() else { return };
             let mut guard = st.borrow_mut();
-            let artist_filter =
-                (win.get_filtered_artist_id() > 0).then(|| win.get_filtered_artist_id() as i64);
-            if let Ok(count) = guard.db.mark_all_releases_seen(artist_filter) {
-                win.set_status_is_warning(false);
-                win.set_status_banner_text(
-                    format!(
-                        "Marked {} {} as seen",
-                        count,
-                        pluralize(count as i64, "release", "releases")
-                    )
-                    .into(),
-                );
+            let release_ids: Vec<i64> = (0..guard.release_model.row_count())
+                .filter_map(|index| guard.release_model.row_data(index))
+                .filter(|release| release.unseen)
+                .map(|release| i64::from(release.id))
+                .collect();
+            match guard.db.mark_releases_seen(&release_ids) {
+                Ok(count) => {
+                    win.set_status_is_warning(false);
+                    win.set_status_banner_text(
+                        format!(
+                            "Marked {} filtered {} as seen",
+                            count,
+                            pluralize(count as i64, "release", "releases")
+                        )
+                        .into(),
+                    );
+                }
+                Err(err) => {
+                    win.set_status_is_warning(true);
+                    win.set_status_banner_text(
+                        format!("Could not mark releases seen: {err}").into(),
+                    );
+                }
             }
             refresh_folders_and_stats(&win, &guard);
             refresh_feed(&win, &mut guard);

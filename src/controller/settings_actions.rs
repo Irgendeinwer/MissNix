@@ -2,7 +2,7 @@ use std::thread;
 
 use missnix_core::{
     AppSettings, ArtistDiscoveryMode, CUSTOM_ACCENT_PRESET, DEFAULT_CUSTOM_ACCENT_HEX,
-    MAX_ACCENT_PRESET, ProviderMode, ScanOutcome, normalize_hex_color, resolve_theme_palette,
+    MAX_ACCENT_PRESET, ProviderMode, normalize_hex_color, resolve_theme_palette,
 };
 use slint::platform::WindowEvent;
 use slint::{Color, ComponentHandle, SharedString};
@@ -10,8 +10,8 @@ use slint::{Color, ComponentHandle, SharedString};
 use crate::folder_picker::pick_music_folder;
 use crate::{AppWindow, Theme};
 
-use super::hydrate::{refresh_artists, refresh_feed, refresh_folders_and_stats};
-use super::workers::start_library_scan;
+use super::hydrate::{refresh_feed, refresh_folders_and_stats};
+use super::workers::request_library_scan;
 use super::{SharedUiState, UiState};
 
 pub(super) fn wire_settings_callbacks(app: &AppWindow, state: &SharedUiState) {
@@ -41,7 +41,7 @@ pub(super) fn wire_settings_callbacks(app: &AppWindow, state: &SharedUiState) {
                 }
             };
             if added_ok {
-                start_library_scan(&weak, &st);
+                request_library_scan(&weak, &st);
             }
         });
     }
@@ -78,24 +78,24 @@ pub(super) fn wire_settings_callbacks(app: &AppWindow, state: &SharedUiState) {
         let st = state.clone();
         app.on_remove_folder(move |folder_id| {
             let Some(win) = weak.upgrade() else { return };
-            let has_remaining = {
-                let mut guard = st.borrow_mut();
-                let _ = guard.db.remove_library_folder(folder_id as i64);
-                let remaining = guard
-                    .db
-                    .list_library_folders()
-                    .map(|v| v.iter().any(|f| f.enabled))
-                    .unwrap_or(false);
-                if !remaining {
-                    let _ = guard.db.apply_scan_outcome(&ScanOutcome::default());
-                    refresh_artists(&win, &mut guard);
-                    refresh_feed(&win, &mut guard);
+            let removed = {
+                let guard = st.borrow();
+                match guard.db.remove_library_folder(folder_id as i64) {
+                    Ok(()) => {
+                        refresh_folders_and_stats(&win, &guard);
+                        true
+                    }
+                    Err(err) => {
+                        win.set_status_is_warning(true);
+                        win.set_status_banner_text(
+                            format!("Could not remove folder: {err}").into(),
+                        );
+                        false
+                    }
                 }
-                refresh_folders_and_stats(&win, &guard);
-                remaining
             };
-            if has_remaining && !win.get_is_busy() {
-                start_library_scan(&weak, &st);
+            if removed {
+                request_library_scan(&weak, &st);
             }
         });
     }
@@ -110,7 +110,7 @@ pub(super) fn wire_settings_callbacks(app: &AppWindow, state: &SharedUiState) {
             let prev_hex = guard.settings.custom_accent_hex.clone();
             let mut updated = read_settings_from_window(&win);
             updated.preview_volume = prev_vol;
-            if normalize_hex_color(&updated.custom_accent_hex).is_none() {
+            if normalize_hex_color(&win.get_pref_custom_accent_hex()).is_none() {
                 updated.custom_accent_hex = prev_hex;
             }
             apply_theme_to_window(&win, &updated);
@@ -126,22 +126,30 @@ pub(super) fn wire_settings_callbacks(app: &AppWindow, state: &SharedUiState) {
         let st = state.clone();
         app.on_scan_preferences_changed(move || {
             let Some(win) = weak.upgrade() else { return };
-            let should_rescan = {
+            let saved = {
                 let mut guard = st.borrow_mut();
-                let prev_vol = guard.settings.preview_volume;
                 let mut updated = read_settings_from_window(&win);
-                updated.preview_volume = prev_vol;
-                let _ = guard.db.save_settings(&updated);
-                guard.settings = updated;
-                !win.get_is_busy()
-                    && guard
-                        .db
-                        .list_library_folders()
-                        .map(|f| f.iter().any(|x| x.enabled))
-                        .unwrap_or(false)
+                updated.preview_volume = guard.settings.preview_volume;
+                if normalize_hex_color(&win.get_pref_custom_accent_hex()).is_none() {
+                    updated.custom_accent_hex = guard.settings.custom_accent_hex.clone();
+                }
+                match guard.db.save_settings(&updated) {
+                    Ok(()) => {
+                        guard.settings = updated;
+                        true
+                    }
+                    Err(err) => {
+                        apply_settings_to_window(&win, &guard.settings);
+                        win.set_status_is_warning(true);
+                        win.set_status_banner_text(
+                            format!("Could not save scan settings: {err}").into(),
+                        );
+                        false
+                    }
+                }
             };
-            if should_rescan {
-                start_library_scan(&weak, &st);
+            if saved {
+                request_library_scan(&weak, &st);
             }
         });
     }

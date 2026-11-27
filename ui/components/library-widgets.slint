@@ -89,6 +89,13 @@ export component ArtistListRow inherits Rectangle {
                     badge-fg: Theme.on-warning-container;
                 }
 
+                if root.artist.status == "missing" : TonalBadge {
+                    y: (parent.height - self.height) / 2;
+                    label: "NOT IN LIBRARY";
+                    badge-bg: Theme.surface-container-highest;
+                    badge-fg: Theme.on-surface-variant;
+                }
+
                 if root.artist.status == "ignored" : TonalBadge {
                     y: (parent.height - self.height) / 2;
                     label: "IGNORED";
@@ -174,7 +181,9 @@ export component ArtistListRow inherits Rectangle {
                     icon-size: 16px;
                     danger: root.artist.status == "ignored";
                     active: root.artist.status == "ignored";
-                    icon: @image-url("../../assets/icons/eye-off.svg");
+                    icon: root.artist.status == "missing"
+                        ? @image-url("../../assets/icons/plus.svg")
+                        : @image-url("../../assets/icons/eye-off.svg");
                     clicked => { root.toggle-ignore(root.artist.id); }
                 }
             }

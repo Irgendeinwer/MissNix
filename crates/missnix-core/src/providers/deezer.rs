@@ -224,41 +224,45 @@ impl DeezerClient {
             .filter(|c| normalize_artist_name(&c.name) == target_norm)
             .collect();
 
-        if exact.is_empty() {
-            return Ok(None);
-        }
-        if exact.len() == 1 || local_normalized_albums.is_empty() {
+        if exact.len() <= 1 {
             return Ok(exact.into_iter().next());
         }
-
-        // Multiple Deezer artists share the exact normalized name!
-        // Check top 4 candidates' albums against user's local albums for deterministic disambiguation.
-        let mut best: Option<(usize, u64, ArtistSearchCandidate)> = None;
-        for cand in exact.into_iter().take(4) {
-            let mut overlap = 0usize;
-            if let Some(dz_id) = cand.deezer_id
-                && let Ok(albums) = self.fetch_raw_artist_albums(dz_id, 1)
-            {
-                for alb in albums {
-                    let n = normalize_release_title(&alb.title);
-                    if !n.is_empty() && local_normalized_albums.contains(&n) {
-                        overlap += 1;
-                    }
-                }
-            }
-            let fans = cand.fan_count.unwrap_or(0);
-            let replace = match &best {
-                None => true,
-                Some((best_overlap, best_fans, _)) => {
-                    overlap > *best_overlap || (overlap == *best_overlap && fans > *best_fans)
-                }
-            };
-            if replace {
-                best = Some((overlap, fans, cand));
-            }
+        // A popularity tie-breaker can associate the entire discography of the
+        // wrong person. Only resolve a homonym when local albums distinguish it.
+        if local_normalized_albums.is_empty() || exact.len() > 4 {
+            return Ok(None);
         }
 
-        Ok(best.map(|(_, _, c)| c))
+        let mut best: Option<(usize, ArtistSearchCandidate)> = None;
+        let mut tied = false;
+        for cand in exact {
+            let Some(dz_id) = cand.deezer_id else {
+                return Ok(None);
+            };
+            let albums = self.fetch_raw_artist_albums(dz_id, 1)?;
+            let overlap = albums
+                .iter()
+                .map(|album| normalize_release_title(&album.title))
+                .filter(|title| !title.is_empty() && local_normalized_albums.contains(title))
+                .collect::<HashSet<_>>()
+                .len();
+            match &best {
+                None => {
+                    best = Some((overlap, cand));
+                    tied = false;
+                }
+                Some((best_overlap, _)) if overlap > *best_overlap => {
+                    best = Some((overlap, cand));
+                    tied = false;
+                }
+                Some((best_overlap, _)) if overlap == *best_overlap => tied = true,
+                _ => {}
+            }
+        }
+        Ok(match best {
+            Some((overlap, candidate)) if overlap > 0 && !tied => Some(candidate),
+            _ => None,
+        })
     }
 
     /// Fetch and deduplicate an artist's releases on Deezer (`album`, `ep`, `single`).

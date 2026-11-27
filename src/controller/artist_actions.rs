@@ -1,6 +1,6 @@
 use std::thread;
 
-use missnix_core::ArtistStatus;
+use missnix_core::{ArtistStatus, scanner::is_valid_uuid};
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::{AppWindow, SearchCandidateRowData};
@@ -71,7 +71,13 @@ pub(super) fn wire_artist_callbacks(app: &AppWindow, state: &SharedUiState) {
                 } else {
                     ArtistStatus::Muted
                 };
-                let _ = guard.db.set_artist_status(art.id, next);
+                if let Err(err) = guard.db.set_artist_status(art.id, next) {
+                    win.set_status_is_warning(true);
+                    win.set_status_banner_text(
+                        format!("Could not change artist status: {err}").into(),
+                    );
+                    return;
+                }
                 win.set_status_is_warning(false);
                 win.set_status_banner_text(
                     if next == ArtistStatus::Muted {
@@ -96,12 +102,18 @@ pub(super) fn wire_artist_callbacks(app: &AppWindow, state: &SharedUiState) {
             let Some(win) = weak.upgrade() else { return };
             let mut guard = st.borrow_mut();
             if let Ok(Some(art)) = guard.db.get_artist(artist_id as i64) {
-                let next = if art.status == ArtistStatus::Ignored {
+                let next = if matches!(art.status, ArtistStatus::Ignored | ArtistStatus::Missing) {
                     ArtistStatus::Tracked
                 } else {
                     ArtistStatus::Ignored
                 };
-                let _ = guard.db.set_artist_status(art.id, next);
+                if let Err(err) = guard.db.set_artist_status(art.id, next) {
+                    win.set_status_is_warning(true);
+                    win.set_status_banner_text(
+                        format!("Could not change artist status: {err}").into(),
+                    );
+                    return;
+                }
                 win.set_status_is_warning(false);
                 win.set_status_banner_text(
                     if next == ArtistStatus::Ignored {
@@ -125,7 +137,11 @@ pub(super) fn wire_artist_callbacks(app: &AppWindow, state: &SharedUiState) {
         app.on_delete_artist(move |artist_id| {
             let Some(win) = weak.upgrade() else { return };
             let mut guard = st.borrow_mut();
-            let _ = guard.db.delete_artist(artist_id as i64);
+            if let Err(err) = guard.db.delete_artist(artist_id as i64) {
+                win.set_status_is_warning(true);
+                win.set_status_banner_text(format!("Could not delete artist: {err}").into());
+                return;
+            }
             if win.get_selected_artist_id() == artist_id {
                 win.set_selected_artist_id(0);
                 if win.get_inspector_mode() == 2 {
@@ -162,9 +178,7 @@ pub(super) fn wire_artist_callbacks(app: &AppWindow, state: &SharedUiState) {
             let mbid_trimmed = mbid_s.trim();
             let mbid_opt = if mbid_trimmed.is_empty() {
                 None
-            } else if mbid_trimmed.len() != 36
-                || mbid_trimmed.chars().filter(|&c| c == '-').count() != 4
-            {
+            } else if !is_valid_uuid(mbid_trimmed) {
                 win.set_status_is_warning(true);
                 win.set_status_banner_text("MusicBrainz MBID must be a 36-char UUID".into());
                 return;
@@ -198,6 +212,12 @@ pub(super) fn wire_artist_callbacks(app: &AppWindow, state: &SharedUiState) {
             }
             let Some(win) = weak.upgrade() else { return };
             win.set_searching_external_artists(true);
+            let request_id = win.get_search_request_id().wrapping_add(1);
+            win.set_search_request_id(request_id);
+            CANDIDATE_STASH.with(|stash| stash.borrow_mut().clear());
+            win.set_artist_search_candidates(ModelRc::new(
+                VecModel::<SearchCandidateRowData>::default(),
+            ));
 
             let (engine, mode) = {
                 let guard = st.borrow();
@@ -211,13 +231,30 @@ pub(super) fn wire_artist_callbacks(app: &AppWindow, state: &SharedUiState) {
                     let Some(win) = weak_done.upgrade() else {
                         return;
                     };
+                    if win.get_search_request_id() != request_id {
+                        return;
+                    }
                     win.set_searching_external_artists(false);
+                    if win.get_manual_artist_query().trim() != q {
+                        return;
+                    }
                     match res {
-                        Ok(cands) => {
+                        Ok(result) => {
+                            if !result.warnings.is_empty() {
+                                win.set_status_is_warning(true);
+                                win.set_status_banner_text(
+                                    format!(
+                                        "Some artist searches failed: {}",
+                                        result.warnings.join("; ")
+                                    )
+                                    .into(),
+                                );
+                            }
                             CANDIDATE_STASH.with(|stash| {
-                                *stash.borrow_mut() = cands.clone();
+                                *stash.borrow_mut() = result.candidates.clone();
                             });
-                            let rows: Vec<SearchCandidateRowData> = cands
+                            let rows: Vec<SearchCandidateRowData> = result
+                                .candidates
                                 .iter()
                                 .enumerate()
                                 .map(|(idx, c)| SearchCandidateRowData {

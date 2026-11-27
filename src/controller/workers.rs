@@ -7,7 +7,7 @@ use std::thread;
 use std::time::Instant;
 
 use missnix_core::{
-    AppPaths, Artist, CoreError, Database, ProgressEvent, ScanOptions, SyncEngine,
+    AppPaths, Artist, CoreError, Database, ProgressEvent, ScanOutcome, SyncEngine,
     is_deezer_preview_url_expired, scan_library_folders_with_options,
 };
 use slint::{
@@ -19,36 +19,76 @@ use crate::{AppWindow, TrackRowData};
 use super::hydrate::{pluralize, to_release_card, tracks_to_model};
 use super::{ImageJob, UiState, WeakUiState};
 
+/// Changes made during a scan or sync must be reconciled after that task ends.
+pub(super) fn request_library_scan(weak: &Weak<AppWindow>, state: &Rc<RefCell<UiState>>) {
+    let Some(win) = weak.upgrade() else { return };
+    if win.get_is_busy() {
+        win.set_scan_pending(true);
+        win.set_status_is_warning(false);
+        win.set_status_banner_text("Library changed; a rescan is queued.".into());
+    } else {
+        start_library_scan(weak, state);
+    }
+}
+
+fn start_queued_scan(win: &AppWindow) {
+    if win.get_scan_pending() {
+        win.set_scan_pending(false);
+        win.invoke_scan_library();
+    }
+}
+
 pub(super) fn start_library_scan(weak: &Weak<AppWindow>, state: &Rc<RefCell<UiState>>) {
     let Some(win) = weak.upgrade() else { return };
     if win.get_is_busy() {
         return;
     }
 
-    let (folders, db_path, scan_options, cancel_flag) = {
+    let (snapshot, db_path, cancel_flag) = {
         let mut guard = state.borrow_mut();
-        let Ok(list) = guard.db.list_library_folders() else {
-            return;
+        let snapshot = match guard.db.prepare_library_scan() {
+            Ok(snapshot) => snapshot,
+            Err(err) => {
+                win.set_status_is_warning(true);
+                win.set_status_banner_text(format!("Cannot prepare scan: {err}").into());
+                return;
+            }
         };
-        let enabled: Vec<_> = list
-            .into_iter()
-            .filter(|f| f.enabled)
-            .map(|f| std::path::PathBuf::from(f.path))
-            .collect();
-        if enabled.is_empty() {
-            win.set_status_is_warning(true);
-            win.set_status_banner_text("Add at least one music folder first".into());
-            win.set_active_view(2);
-            return;
-        }
         guard.cancel_flag = Arc::new(AtomicBool::new(false));
         (
-            enabled,
+            snapshot,
             guard.paths.db_path.clone(),
-            ScanOptions::from_settings(&guard.settings),
             guard.cancel_flag.clone(),
         )
     };
+
+    // Removing the final folder is an intentional empty library, not a scan of
+    // an inaccessible mount. Revision checking still prevents old workers from
+    // restoring the removed folder's snapshot.
+    if snapshot.folders.is_empty() {
+        let result = state.borrow_mut().db.apply_scan_outcome_checked(
+            &ScanOutcome::default(),
+            &snapshot,
+            false,
+            None,
+        );
+        match result {
+            Ok(()) => {
+                win.set_status_is_warning(false);
+                win.set_status_banner_text(
+                    "No music folders selected; previous artist history was retained.".into(),
+                );
+            }
+            Err(err) => {
+                win.set_status_is_warning(true);
+                win.set_status_banner_text(format!("Scan error: {err}").into());
+            }
+        }
+        win.invoke_feed_filters_changed();
+        win.invoke_artist_filters_changed();
+        win.invoke_navigate(win.get_active_view());
+        return;
+    }
 
     win.set_is_busy(true);
     win.set_progress_indeterminate(true);
@@ -60,8 +100,8 @@ pub(super) fn start_library_scan(weak: &Weak<AppWindow>, state: &Rc<RefCell<UiSt
 
     thread::spawn(move || {
         let scan_res = scan_library_folders_with_options(
-            &folders,
-            &scan_options,
+            &snapshot.folders,
+            &snapshot.options,
             Some(&cancel_flag),
             |folder_name, count| {
                 let label = format!("Scanned {count} files · {folder_name}");
@@ -76,7 +116,7 @@ pub(super) fn start_library_scan(weak: &Weak<AppWindow>, state: &Rc<RefCell<UiSt
 
         let final_res = scan_res.and_then(|outcome| {
             let mut worker_db = Database::open(&db_path)?;
-            worker_db.apply_scan_outcome(&outcome)?;
+            worker_db.apply_scan_outcome_checked(&outcome, &snapshot, false, Some(&cancel_flag))?;
             Ok(outcome.summary)
         });
 
@@ -114,6 +154,7 @@ pub(super) fn start_library_scan(weak: &Weak<AppWindow>, state: &Rc<RefCell<UiSt
             win.invoke_feed_filters_changed();
             win.invoke_artist_filters_changed();
             win.invoke_navigate(win.get_active_view());
+            start_queued_scan(&win);
         });
     });
 }
@@ -151,7 +192,9 @@ pub(super) fn start_release_sync(
         }
 
         guard.cancel_flag = Arc::new(AtomicBool::new(false));
-        guard.last_auto_check = Instant::now();
+        if only_artist_id.is_none() {
+            guard.last_auto_check = Instant::now();
+        }
         (
             target_artists,
             guard.settings.clone(),
@@ -177,6 +220,7 @@ pub(super) fn start_release_sync(
     let weak_done = weak.clone();
 
     thread::spawn(move || {
+        let total_artists = artists.len();
         let result = Database::open(&db_path).and_then(|mut worker_db| {
             engine.sync_artists(
                 &mut worker_db,
@@ -221,28 +265,28 @@ pub(super) fn start_release_sync(
             win.set_progress_fraction(0.0);
             match result {
                 Ok(sum) => {
-                    if sum.offline_or_rate_limited && sum.artists_checked == 0 {
-                        win.set_status_is_warning(true);
-                        win.set_status_banner_text(
-                            sum.last_error
-                                .unwrap_or_else(|| {
-                                    "Offline or rate-limited by provider".to_string()
-                                })
-                                .into(),
-                        );
-                    } else {
-                        win.set_status_is_warning(sum.offline_or_rate_limited);
-                        win.set_status_banner_text(
-                            format!(
-                                "Checked {} {} · {} new {}",
-                                sum.artists_checked,
-                                pluralize(sum.artists_checked as i64, "artist", "artists"),
-                                sum.new_releases_added,
-                                pluralize(sum.new_releases_added as i64, "drop", "drops"),
-                            )
-                            .into(),
-                        );
+                    let not_attempted =
+                        total_artists.saturating_sub(sum.artists_checked + sum.artists_failed);
+                    let incomplete =
+                        sum.artists_failed > 0 || sum.artists_partial > 0 || not_attempted > 0;
+                    win.set_status_is_warning(incomplete);
+                    let mut message = format!(
+                        "Checked {} {} · {} new {}",
+                        sum.artists_checked,
+                        pluralize(sum.artists_checked as i64, "artist", "artists"),
+                        sum.new_releases_added,
+                        pluralize(sum.new_releases_added as i64, "drop", "drops"),
+                    );
+                    if incomplete {
+                        message.push_str(&format!(
+                            " · {} partial, {} failed, {} not checked",
+                            sum.artists_partial, sum.artists_failed, not_attempted
+                        ));
+                        if let Some(error) = sum.last_error {
+                            message.push_str(&format!(". {error}"));
+                        }
                     }
+                    win.set_status_banner_text(message.into());
                 }
                 Err(CoreError::Cancelled) => {
                     win.set_status_is_warning(false);
@@ -256,6 +300,7 @@ pub(super) fn start_release_sync(
             win.invoke_feed_filters_changed();
             win.invoke_artist_filters_changed();
             win.invoke_navigate(win.get_active_view());
+            start_queued_scan(&win);
         });
     });
 }
@@ -353,9 +398,12 @@ pub(super) fn spawn_image_worker(
                     let Ok(Some(local_path)) =
                         engine.ensure_release_cover_cached(&worker_db, &release)
                     else {
+                        clear_failed_image_job(release.id, true);
                         continue;
                     };
                     let Some((w, h, rgba)) = decode_thumbnail_rgba(&local_path, 300) else {
+                        let _ = std::fs::remove_file(&local_path);
+                        clear_failed_image_job(release.id, true);
                         continue;
                     };
 
@@ -406,9 +454,12 @@ pub(super) fn spawn_image_worker(
                     let Ok(Some(local_path)) =
                         engine.ensure_artist_avatar_cached(&paths.avatar_cache_dir, &artist)
                     else {
+                        clear_failed_image_job(artist.id, false);
                         continue;
                     };
                     let Some((w, h, rgba)) = decode_thumbnail_rgba(&local_path, 128) else {
+                        let _ = std::fs::remove_file(&local_path);
+                        clear_failed_image_job(artist.id, false);
                         continue;
                     };
 
@@ -453,6 +504,21 @@ pub(super) fn spawn_image_worker(
                 }
             }
         }
+    });
+}
+
+fn clear_failed_image_job(id: i64, is_cover: bool) {
+    let _ = slint::invoke_from_event_loop(move || {
+        UI_STATE_SLOT.with(|slot| {
+            if let Some(state) = slot.borrow().as_ref().and_then(std::rc::Weak::upgrade) {
+                let mut guard = state.borrow_mut();
+                if is_cover {
+                    guard.inflight_covers.remove(&id);
+                } else {
+                    guard.inflight_avatars.remove(&id);
+                }
+            }
+        });
     });
 }
 

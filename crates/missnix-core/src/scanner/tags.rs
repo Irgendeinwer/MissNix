@@ -152,13 +152,14 @@ fn parse_year_from_tag(tag: &Tag) -> Option<i32> {
 }
 
 fn extract_uuid(raw: String) -> Option<String> {
-    for part in raw.split([';', '/', ',', ' ']) {
-        let p = part.trim().to_ascii_lowercase();
-        if is_valid_uuid(&p) {
-            return Some(p);
-        }
-    }
-    None
+    // IDs in a multi-credit tag are ordered. Skipping an invalid first ID could
+    // silently attach the guest's ID to the leading artist.
+    let first = raw
+        .split([';', '/', ',', ' '])
+        .map(str::trim)
+        .find(|part| !part.is_empty())?
+        .to_ascii_lowercase();
+    is_valid_uuid(&first).then_some(first)
 }
 
 pub fn is_valid_uuid(s: &str) -> bool {
@@ -269,5 +270,20 @@ pub(super) fn infer_from_folder_hierarchy(root: &Path, file_path: &Path) -> Fold
                 structured_album_hierarchy: true,
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod uuid_tests {
+    use super::extract_uuid;
+
+    #[test]
+    fn does_not_use_a_guest_uuid_when_the_leading_credit_is_invalid() {
+        let guest = "11111111-2222-3333-4444-555555555555";
+        assert_eq!(extract_uuid(format!("invalid; {guest}")), None);
+        assert_eq!(
+            extract_uuid(format!("{guest}; invalid")).as_deref(),
+            Some(guest)
+        );
     }
 }

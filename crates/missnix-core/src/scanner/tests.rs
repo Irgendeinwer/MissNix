@@ -227,3 +227,81 @@ fn prevents_multi_artist_tag_pollution_and_supports_folder_only_mode() {
 
     let _ = fs::remove_dir_all(&root);
 }
+
+#[test]
+fn rejects_missing_and_incomplete_roots_instead_of_returning_partial_snapshots() {
+    let root = unique_temp_dir("incomplete");
+    let music = root.join("present/Artist/Album");
+    fs::create_dir_all(&music).unwrap();
+    fs::write(music.join("track.flac"), b"placeholder").unwrap();
+    let present = root.join("present");
+    let missing = root.join("missing");
+    let result = scan_library_folders(&[present.clone(), missing], false, None, |_, _| {});
+    assert!(result.is_err());
+
+    let file_root = music.join("track.flac");
+    assert!(scan_library_folders(&[file_root], false, None, |_, _| {}).is_err());
+
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(root.join("does-not-exist"), present.join("broken-link"))
+            .unwrap();
+        assert!(scan_library_folders(&[present], false, None, |_, _| {}).is_err());
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn never_attaches_guest_track_mbid_to_an_album_or_folder_artist() {
+    let guest_id = "11111111-2222-3333-4444-555555555555";
+    let mut meta = ExtractedTrackMeta {
+        album_artist: Some("Main Artist".to_string()),
+        track_artist: Some("Guest Artist".to_string()),
+        mb_track_artist_id: Some(guest_id.to_string()),
+        ..ExtractedTrackMeta::default()
+    };
+    let hint = FolderHint {
+        artist: Some("Main Artist".to_string()),
+        structured_album_hierarchy: true,
+        ..FolderHint::default()
+    };
+    for mode in [
+        ArtistDiscoveryMode::FolderOnly,
+        ArtistDiscoveryMode::AlbumArtistOrFolder,
+        ArtistDiscoveryMode::AllTagsAndFolder,
+    ] {
+        let options = ScanOptions {
+            discovery_mode: mode,
+            ..ScanOptions::default()
+        };
+        let resolved = resolve_artist_identity(&meta, &hint, &options).unwrap();
+        assert_eq!(resolved.artist_name, "Main Artist");
+        assert_eq!(resolved.mb_artist_id, None, "mode {mode:?}");
+
+        meta.track_artist = Some("Main Artist feat. Guest Artist".to_string());
+        let resolved = resolve_artist_identity(&meta, &hint, &options).unwrap();
+        assert_eq!(resolved.mb_artist_id.as_deref(), Some(guest_id));
+        meta.track_artist = Some("Guest Artist".to_string());
+    }
+
+    // Prefixes are not identity: "Art" must not take "Artist"'s leading ID.
+    let meta = ExtractedTrackMeta {
+        track_artist: Some("Artist; Art".to_string()),
+        mb_track_artist_id: Some(guest_id.to_string()),
+        ..ExtractedTrackMeta::default()
+    };
+    let hint = FolderHint {
+        artist: Some("Art".to_string()),
+        ..FolderHint::default()
+    };
+    let options = ScanOptions {
+        discovery_mode: ArtistDiscoveryMode::FolderOnly,
+        ..ScanOptions::default()
+    };
+    assert_eq!(
+        resolve_artist_identity(&meta, &hint, &options)
+            .unwrap()
+            .mb_artist_id,
+        None
+    );
+}

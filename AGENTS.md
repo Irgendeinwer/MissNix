@@ -32,7 +32,6 @@ MissNix/
 │       ├── db/                       # SQLite persistence layer
 │       │   ├── mod.rs                # Connection setup, WAL/pragmas, transactions, stats
 │       │   ├── schema.rs             # Canonical DDL,SCHEMA_VERSION migrations, schema validation
-│       │   ├── salvage.rs            # Non-destructive recovery from pre-canonical SQLite snapshots
 │       │   ├── folders.rs            # Library folder CRUD & scan-outcome reconciliation
 │       │   ├── artists.rs            # Artist queries, status transitions, manual additions
 │       │   ├── releases.rs           # Release upsert, edition deduplication, feed queries, tracks
@@ -96,9 +95,9 @@ Keep `crates/missnix-core` completely free of `slint` or audio-device dependenci
 | Path | Purpose |
 | :--- | :--- |
 | `$XDG_DATA_HOME/missnix/missnix.db` | SQLite WAL database (folders, artists, local albums, releases, tracks, settings) |
-| `$XDG_CACHE_HOME/missnix/covers/` | Cached release cover artwork (`release_<id>.img`) |
-| `$XDG_CACHE_HOME/missnix/avatars/` | Cached artist portraits (`artist_<id>.img`) |
-| `$XDG_CACHE_HOME/missnix/previews/` | Cached 30-second MP3 track previews |
+| `$XDG_CACHE_HOME/missnix/db-<path-hash>/covers/` | Database-scoped release cover artwork |
+| `$XDG_CACHE_HOME/missnix/db-<path-hash>/avatars/` | Database-scoped artist portraits |
+| `$XDG_CACHE_HOME/missnix/db-<path-hash>/previews/` | Database-scoped 30-second MP3 track previews |
 
 ### Scheduled Headless Background Checks (`systemd --user`)
 
@@ -128,13 +127,13 @@ gh attestation verify missnix-v*-linux-x86_64.AppImage --repo Irgendeinwer/MissN
 ## 4. Core Engineering Invariants
 
 ### SQLite Schema & Data Preservation (`crates/missnix-core/src/db/`)
-- **Never wipe user data on schema upgrades.** Increment `SCHEMA_VERSION` in `db/schema.rs` and apply additive migrations while preserving `library_folders`, `artists` (`muted`/`ignored` statuses and manual entries), `releases` (`seen`/`dismissed` states), and `settings`.
+- **Never wipe user data on schema upgrades.** Increment `SCHEMA_VERSION` in `db/schema.rs` and apply explicit, transactional additive migrations while preserving `library_folders`, artists, releases, tracks, and settings. Refuse unknown or newer schemas instead of guessing or rebuilding them in place.
 
 ### Artist Discovery & Multi-Artist Tag Hygiene (`normalize.rs` & `scanner/`)
 - Default discovery mode is `ArtistDiscoveryMode::AlbumArtistOrFolder`: prefer `ALBUMARTIST` and structured `<Artist>/<Album>/<Track>` directories over track `ARTIST` so featured guests do not pollute the artist list.
 - `extract_primary_artist` splits collaboration delimiters (`;`, `\`, ` / `, `feat.`, `, `) while preserving legitimate comma/slash artist names (`Tyler, The Creator`, `Black Country, New Road`, `Earth, Wind & Fire`, `AC/DC`, `+44`).
 - Only attach embedded MusicBrainz Artist IDs when the embedded tag matches the resolved primary artist (`safe_tag_mbid`).
-- `apply_scan_outcome` prunes stale `source = 'local' AND status = 'tracked' AND local_track_count = 0` entries on rescan while keeping manual artists and `muted`/`ignored` preferences.
+- Apply full filesystem scans only with a matching `LibraryScanSnapshot`; incomplete, stale, cancelled, or unexpectedly empty scans must not replace the last good library. Retire missing local artists without deleting their release history, and restore them if they reappear. Keep manual artists and muted/ignored preferences.
 
 ### Slint 1.19 Desktop UI, Theme & Scaling Rules (`ui/` & `src/controller/`)
 - **Custom themed controls (no unthemed `std-widgets` chrome)**: Slint 1.19's `std-widgets` `Palette` properties are read-only `out` properties, and its `material` `ScrollBar` draws a hollow `1px` border rectangle with no fill. Always use `M3Button`, `M3IconButton`, `M3FilterChip`, `M3SearchField`, `M3LabeledInput`, `M3Switch`, `M3Select`, `M3ProgressBar`, `M3Spinner`, and `M3ScrollBar` (with `vertical-scrollbar-policy: ScrollBarPolicy.always-off` on `ScrollView` / `ListView`), driven by the global `Theme` singleton (`crates/missnix-core/src/palette.rs`).

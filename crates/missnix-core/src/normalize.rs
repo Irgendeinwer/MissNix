@@ -73,8 +73,9 @@ pub fn strip_featured_artists(raw: &str) -> String {
     // Remove parenthesized/bracketed feat clauses first, e.g. "Artist (feat. Someone)"
     let mut cleaned = strip_matching_brackets(first_null, is_feat_clause);
 
-    // Strip unbracketed " feat. ...", " ft. ...", " featuring ..."
-    let lower = cleaned.to_lowercase();
+    // The markers are ASCII. ASCII-only lowercasing preserves the byte offsets of
+    // the original UTF-8 string, unlike Unicode lowercasing (e.g. ẞ or İ).
+    let lower = cleaned.to_ascii_lowercase();
     for marker in [
         " feat. ",
         " feat ",
@@ -602,6 +603,13 @@ mod tests {
             strip_featured_artists("Daft Punk (feat. Pharrell Williams)"),
             "Daft Punk"
         );
+    }
+
+    #[test]
+    fn strips_features_without_corrupting_unicode_byte_offsets() {
+        assert_eq!(strip_featured_artists("GROẞ feat. Guest"), "GROẞ");
+        assert_eq!(strip_featured_artists("STRAẞE feat. Guest"), "STRAẞE");
+        assert_eq!(strip_featured_artists("İ FEAT. Guest"), "İ");
     }
 
     #[test]

@@ -6,6 +6,9 @@ pub enum ArtistStatus {
     Tracked,
     Muted,
     Ignored,
+    /// A locally discovered artist whose files are no longer in the scanned library.
+    /// Its releases and user state are retained and tracking resumes if it reappears.
+    Missing,
 }
 
 impl ArtistStatus {
@@ -14,6 +17,7 @@ impl ArtistStatus {
             Self::Tracked => "tracked",
             Self::Muted => "muted",
             Self::Ignored => "ignored",
+            Self::Missing => "missing",
         }
     }
 
@@ -21,6 +25,7 @@ impl ArtistStatus {
         match value {
             "muted" => Self::Muted,
             "ignored" => Self::Ignored,
+            "missing" => Self::Missing,
             _ => Self::Tracked,
         }
     }
@@ -30,6 +35,7 @@ impl ArtistStatus {
             Self::Tracked => "Tracked",
             Self::Muted => "Muted",
             Self::Ignored => "Ignored",
+            Self::Missing => "Not in library",
         }
     }
 }
@@ -480,7 +486,9 @@ pub struct ScanSummary {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SyncSummary {
+    /// Artists with at least one provider checked; `artists_partial` is a subset.
     pub artists_checked: usize,
+    pub artists_partial: usize,
     pub artists_failed: usize,
     pub new_releases_added: usize,
     pub releases_updated: usize,
@@ -495,6 +503,7 @@ pub struct LibraryStats {
     pub tracked_artists: usize,
     pub muted_artists: usize,
     pub ignored_artists: usize,
+    pub missing_artists: usize,
     pub local_albums: usize,
     pub total_releases: usize,
     pub unseen_releases: usize,

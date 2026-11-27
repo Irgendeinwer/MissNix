@@ -39,7 +39,21 @@ pub(super) fn refresh_folders_and_stats(win: &AppWindow, state: &UiState) {
     }
 
     if let Ok(stats) = state.db.library_stats() {
-        win.set_unseen_badge_count(stats.unseen_releases as i32);
+        // The navigation badge follows the global radar preferences (including
+        // ownership, release types and lookback), not the unfiltered DB count.
+        let badge_query = FeedQuery {
+            only_unseen: true,
+            hide_owned: win.get_feed_hide_owned(),
+            include_albums: state.settings.include_albums,
+            include_eps: state.settings.include_eps,
+            include_singles: state.settings.include_singles,
+            cutoff_date: (state.settings.lookback_days > 0)
+                .then(|| days_ago_iso_utc(state.settings.lookback_days)),
+            ..FeedQuery::default()
+        };
+        if let Ok(unseen) = state.db.query_releases(&badge_query) {
+            win.set_unseen_badge_count(unseen.len() as i32);
+        }
         win.set_library_summary_text(
             format!(
                 "{} tracked {}\n{} local {}",
@@ -85,6 +99,12 @@ pub(super) fn refresh_feed(win: &AppWindow, state: &mut UiState) {
         return;
     };
 
+    win.set_filtered_unseen_count(
+        releases
+            .iter()
+            .filter(|release| release.state == ReleaseState::Unseen)
+            .count() as i32,
+    );
     let mut cards = Vec::with_capacity(releases.len());
     for rel in releases {
         let cached_img = state.decoded_covers.get(&rel.id).cloned();

@@ -114,6 +114,7 @@ Running `missnix` with no flags launches the desktop app. Pass flags to run head
 missnix [OPTIONS]
 
   --scan <FOLDER>   Add and scan a local music folder
+  --accept-empty-folders  Confirm previously indexed folders are intentionally empty (with --scan)
   --check           Check tracked artists for new releases
   --notify          Send a desktop notification when --check finds new drops
   --status          Print tracked artist and unread release counts
@@ -123,6 +124,29 @@ missnix [OPTIONS]
   -h, --help        Show help
   -V, --version     Show version
 ```
+
+### Data safety and incomplete checks
+
+- A scan fails without replacing the previous library if a configured folder is missing,
+  unreadable, or could not be traversed. If a previously indexed folder suddenly has no
+  audio files, the scan is also stopped: reconnect the drive and scan again. If the folder
+  really was emptied, remove and re-add it in the app, or use `--accept-empty-folders`
+  together with `--scan` in the CLI. This confirmation applies to all empty configured
+  folders in that scan.
+- Removing music folders or rescanning no longer deletes the corresponding artist's
+  release history and user state. Artists no longer found locally are marked **Not in
+  library**; they resume tracking if found again, or can be manually tracked from their
+  artist details. Manually added artists remain tracked when local files disappear.
+- Unknown, incompatible, or newer database schemas are rejected without an automatic
+  rebuild. Keep the original database and any SQLite `-wal`/`-shm` files together; use a
+  verified backup or an explicit migration rather than opening unrelated files as MissNix
+  databases. Existing incorrect provider IDs from earlier scans can be corrected in an
+  artist's details.
+- A partial or failed provider check is shown as a warning; `--check` exits non-zero if
+  any artist was not fully checked. Successfully fetched releases are retained. The
+  **Mark Filtered Seen** action only changes releases matching the current radar filters.
+- Cover, avatar and preview caches are namespaced by database path. Older shared-cache
+  files are left on disk but are not reused, avoiding cross-database mix-ups.
 
 ---
 

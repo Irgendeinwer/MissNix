@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::process::{Command, ExitCode};
 
 use missnix_core::{
-    AppPaths, Database, HeadlessReport, ProgressEvent, ScanOptions, SyncEngine,
+    AppPaths, Database, HeadlessReport, ProgressEvent, SyncEngine,
     scan_library_folders_with_options,
 };
 use slint::ComponentHandle;
@@ -16,6 +16,7 @@ slint::include_modules!();
 #[derive(Default)]
 struct HeadlessOptions {
     scan_dirs: Vec<String>,
+    accept_empty_folders: bool,
     run_check: bool,
     print_status: bool,
     json_output: bool,
@@ -48,7 +49,7 @@ fn main() -> ExitCode {
             "--db" => {
                 i += 1;
                 if let Some(p) = args.get(i) {
-                    paths.db_path = PathBuf::from(p);
+                    paths.set_database_path(PathBuf::from(p));
                 } else {
                     eprintln!("Error: --db requires a file path");
                     return ExitCode::FAILURE;
@@ -82,6 +83,9 @@ fn main() -> ExitCode {
             "--check" => {
                 headless.run_check = true;
             }
+            "--accept-empty-folders" => {
+                headless.accept_empty_folders = true;
+            }
             "--status" => {
                 headless.print_status = true;
             }
@@ -100,6 +104,10 @@ fn main() -> ExitCode {
         i += 1;
     }
 
+    if headless.accept_empty_folders && headless.scan_dirs.is_empty() {
+        eprintln!("Error: --accept-empty-folders requires --scan");
+        return ExitCode::FAILURE;
+    }
     if headless.notify && !headless.run_check {
         eprintln!("Error: --notify requires --check");
         return ExitCode::FAILURE;
@@ -157,21 +165,19 @@ fn run_headless_cli(paths: AppPaths, opts: &HeadlessOptions) -> Result<(), Strin
     }
 
     if !opts.scan_dirs.is_empty() {
-        let folders: Vec<PathBuf> = db
-            .list_library_folders()
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .filter(|f| f.enabled)
-            .map(|f| PathBuf::from(f.path))
-            .collect();
-
+        let snapshot = db.prepare_library_scan().map_err(|e| e.to_string())?;
         if !opts.json_output {
-            println!("Scanning {} library folder(s)...", folders.len());
+            println!("Scanning {} library folder(s)...", snapshot.folders.len());
         }
-        let scan_opts = ScanOptions::from_settings(&settings);
-        let outcome = scan_library_folders_with_options(&folders, &scan_opts, None, |_, _| {})
+        let outcome = scan_library_folders_with_options(
+            &snapshot.folders,
+            &snapshot.options,
+            None,
+            |_, _| {},
+        )
+        .map_err(|e| e.to_string())?;
+        db.apply_scan_outcome_checked(&outcome, &snapshot, opts.accept_empty_folders, None)
             .map_err(|e| e.to_string())?;
-        db.apply_scan_outcome(&outcome).map_err(|e| e.to_string())?;
         if !opts.json_output {
             println!(
                 "Scan complete: {} audio files -> {} artists, {} local albums indexed.",
@@ -183,6 +189,7 @@ fn run_headless_cli(paths: AppPaths, opts: &HeadlessOptions) -> Result<(), Strin
         report.scan = Some(outcome.summary);
     }
 
+    let mut sync_failure = None;
     if opts.run_check {
         let tracked = db.list_tracked_artists().map_err(|e| e.to_string())?;
         if !opts.json_output {
@@ -206,11 +213,28 @@ fn run_headless_cli(paths: AppPaths, opts: &HeadlessOptions) -> Result<(), Strin
                 }
             })
             .map_err(|e| e.to_string())?;
+        let not_attempted = tracked
+            .len()
+            .saturating_sub(summary.artists_checked + summary.artists_failed);
         if !opts.json_output {
             println!(
-                "Release check complete: {} checked, {} new releases added ({} owned locally).",
-                summary.artists_checked, summary.new_releases_added, summary.owned_deduplicated
+                "Release check: {} checked ({} partial), {} failed, {} not checked; {} new releases ({} owned locally).",
+                summary.artists_checked,
+                summary.artists_partial,
+                summary.artists_failed,
+                not_attempted,
+                summary.new_releases_added,
+                summary.owned_deduplicated
             );
+        }
+        if summary.artists_failed > 0 || summary.artists_partial > 0 || not_attempted > 0 {
+            sync_failure = Some(format!(
+                "Release check was incomplete: {}",
+                summary
+                    .last_error
+                    .as_deref()
+                    .unwrap_or("some artists were not checked")
+            ));
         }
         let new_added = summary.new_releases_added;
         report.check = Some(summary);
@@ -232,11 +256,12 @@ fn run_headless_cli(paths: AppPaths, opts: &HeadlessOptions) -> Result<(), Strin
         if !opts.json_output {
             println!("MissNix Database: {}", paths.db_path.display());
             println!(
-                "Artists: {} total ({} tracked, {} muted, {} ignored)",
+                "Artists: {} total ({} tracked, {} muted, {} ignored, {} not in library)",
                 stats.total_artists,
                 stats.tracked_artists,
                 stats.muted_artists,
-                stats.ignored_artists
+                stats.ignored_artists,
+                stats.missing_artists
             );
             println!("Local Albums Indexed: {}", stats.local_albums);
             println!(
@@ -250,7 +275,9 @@ fn run_headless_cli(paths: AppPaths, opts: &HeadlessOptions) -> Result<(), Strin
     if opts.json_output {
         println!("{}", report.to_json_pretty()?);
     }
-
+    if let Some(error) = sync_failure {
+        return Err(error);
+    }
     Ok(())
 }
 
@@ -285,6 +312,7 @@ fn print_help() {
            --db <FILE>       Override SQLite database file path\n  \
            --scale <PCT>     Set HiDPI UI scale percentage (75..250, e.g. 125 or 150)\n  \
            --scan <FOLDER>   Add & scan a local music folder headlessly\n  \
+           --accept-empty-folders  Confirm previously indexed folders are intentionally empty\n  \
            --check           Check Deezer + MusicBrainz for new releases headlessly\n  \
            --notify          Send a desktop notification when --check finds new drops\n  \
            --status          Print tracked artist & unread release counts\n  \

@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 use crate::error::CoreResult;
 
-pub(super) const SCHEMA_VERSION: i32 = 2;
+pub(super) const SCHEMA_VERSION: i32 = 3;
 
 pub(super) const CANONICAL_DDL: &str = "
     CREATE TABLE IF NOT EXISTS library_folders (

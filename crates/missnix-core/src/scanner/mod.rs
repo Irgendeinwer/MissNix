@@ -47,7 +47,7 @@ pub struct DiscoveredArtistRecord {
     pub albums: HashMap<String, DiscoveredAlbumRecord>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScanOptions {
     pub discovery_mode: ArtistDiscoveryMode,
     pub split_collaborations: bool,
@@ -129,23 +129,33 @@ where
         if cancel_flag.is_some_and(|c| c.load(Ordering::Relaxed)) {
             return Err(CoreError::Cancelled);
         }
-        if !root.exists() {
-            outcome.folder_track_counts.insert(root.clone(), 0);
-            continue;
+        let metadata = std::fs::metadata(root).map_err(|source| CoreError::Io {
+            path: root.clone(),
+            source,
+        })?;
+        if !metadata.is_dir() {
+            return Err(CoreError::Validation(format!(
+                "Music folder is not a directory: {}",
+                root.display()
+            )));
         }
 
         outcome.summary.folders_scanned += 1;
         let root_display = root.to_string_lossy().to_string();
         let mut folder_tracks = 0usize;
 
-        for entry in WalkDir::new(root)
-            .follow_links(true)
-            .into_iter()
-            .filter_map(Result::ok)
-        {
+        for entry in WalkDir::new(root).follow_links(true) {
             if cancel_flag.is_some_and(|c| c.load(Ordering::Relaxed)) {
                 return Err(CoreError::Cancelled);
             }
+            // Never treat an unreadable directory, broken symlink, or traversal error as an
+            // empty part of the library. The caller must not apply a partial snapshot.
+            let entry = entry.map_err(|err| {
+                CoreError::Validation(format!(
+                    "Could not completely scan {}: {err}. Library data was not changed.",
+                    root.display()
+                ))
+            })?;
             if !entry.file_type().is_file() {
                 continue;
             }
@@ -153,6 +163,12 @@ where
             if !is_supported_audio_file(file_path) {
                 continue;
             }
+            // Parsing invalid or untagged audio may fall back to folder names,
+            // but an unreadable file is an incomplete scan, not an untagged one.
+            std::fs::File::open(file_path).map_err(|source| CoreError::Io {
+                path: file_path.to_path_buf(),
+                source,
+            })?;
 
             outcome.summary.audio_files_seen += 1;
             folder_tracks += 1;
@@ -303,22 +319,20 @@ fn resolve_artist_identity(
         ArtistDiscoveryMode::FolderOnly => {
             let fa = clean_folder_artist?;
             let fa_norm = fold_diacritics_and_symbols(&fa);
-            // Attach embedded MBID only if the embedded artist tag actually matches this folder artist
-            let mbid = if clean_album_artist
+            // Album-artist and track-artist IDs are not interchangeable: a track can
+            // credit a guest even when the album belongs to the folder artist.
+            let album_mbid = clean_album_artist
                 .as_deref()
-                .is_some_and(|aa| fold_diacritics_and_symbols(aa) == fa_norm)
-            {
-                meta.mb_album_artist_id
-                    .clone()
-                    .or_else(|| meta.mb_track_artist_id.clone())
-            } else if clean_track_artist
-                .as_deref()
-                .is_some_and(|ta| fold_diacritics_and_symbols(ta) == fa_norm)
-            {
-                meta.mb_track_artist_id.clone()
-            } else {
-                None
-            };
+                .filter(|aa| fold_diacritics_and_symbols(aa) == fa_norm)
+                .and_then(|_| {
+                    safe_tag_mbid(
+                        meta.album_artist.as_deref(),
+                        &fa,
+                        meta.mb_album_artist_id.as_deref(),
+                    )
+                });
+            let mbid = album_mbid
+                .or_else(|| matching_track_mbid(meta, &fa, clean_track_artist.as_deref()));
             Some(ResolvedArtist {
                 artist_name: fa,
                 mb_artist_id: mbid,
@@ -331,10 +345,9 @@ fn resolve_artist_identity(
                 let mbid = safe_tag_mbid(
                     meta.album_artist.as_deref(),
                     &aa,
-                    meta.mb_album_artist_id
-                        .as_deref()
-                        .or(meta.mb_track_artist_id.as_deref()),
-                );
+                    meta.mb_album_artist_id.as_deref(),
+                )
+                .or_else(|| matching_track_mbid(meta, &aa, clean_track_artist.as_deref()));
                 return Some(ResolvedArtist {
                     artist_name: aa,
                     mb_artist_id: mbid,
@@ -391,10 +404,9 @@ fn resolve_artist_identity(
                 let mbid = safe_tag_mbid(
                     meta.album_artist.as_deref(),
                     &aa,
-                    meta.mb_album_artist_id
-                        .as_deref()
-                        .or(meta.mb_track_artist_id.as_deref()),
-                );
+                    meta.mb_album_artist_id.as_deref(),
+                )
+                .or_else(|| matching_track_mbid(meta, &aa, clean_track_artist.as_deref()));
                 return Some(ResolvedArtist {
                     artist_name: aa,
                     mb_artist_id: mbid,
@@ -422,16 +434,35 @@ fn resolve_artist_identity(
     }
 }
 
+/// Only use a track-artist ID for an album/folder artist when the track's resolved
+/// primary artist is the same person and the ID belongs to that leading credit.
+fn matching_track_mbid(
+    meta: &ExtractedTrackMeta,
+    chosen_artist: &str,
+    clean_track_artist: Option<&str>,
+) -> Option<String> {
+    clean_track_artist
+        .filter(|artist| {
+            fold_diacritics_and_symbols(artist) == fold_diacritics_and_symbols(chosen_artist)
+        })
+        .and_then(|_| {
+            safe_tag_mbid(
+                meta.track_artist.as_deref(),
+                chosen_artist,
+                meta.mb_track_artist_id.as_deref(),
+            )
+        })
+}
+
 /// Only keep the extracted first UUID when `chosen_artist` corresponds to the lead artist
 /// of `raw_tag` (prevents attaching Artist A's UUID to Artist B when folder hint selects Artist B).
 fn safe_tag_mbid(raw_tag: Option<&str>, chosen_artist: &str, mbid: Option<&str>) -> Option<String> {
     let uuid = mbid?;
-    let Some(raw) = raw_tag else {
-        return Some(uuid.to_string());
-    };
-    let raw_norm = fold_diacritics_and_symbols(raw);
+    let raw = raw_tag?;
+    let leading_artist = extract_primary_artist(raw, None, true);
+    let leading_norm = fold_diacritics_and_symbols(&leading_artist);
     let chosen_norm = fold_diacritics_and_symbols(chosen_artist);
-    if !chosen_norm.is_empty() && raw_norm.starts_with(&chosen_norm) {
+    if !chosen_norm.is_empty() && leading_norm == chosen_norm {
         Some(uuid.to_string())
     } else {
         None

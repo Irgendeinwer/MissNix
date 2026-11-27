@@ -237,9 +237,17 @@ impl MusicBrainzClient {
             return Ok(None);
         }
         let candidates = self.search_artists(artist_name, 8)?;
-        Ok(candidates
+        let mut exact = candidates
             .into_iter()
-            .find(|c| normalize_artist_name(&c.name) == target_norm))
+            .filter(|c| normalize_artist_name(&c.name) == target_norm);
+        let first = exact.next();
+        // Same-name artists are not interchangeable. Leave ambiguous identities
+        // unresolved rather than silently persisting the first search result.
+        if exact.next().is_some() {
+            Ok(None)
+        } else {
+            Ok(first)
+        }
     }
 
     /// Fetch official Album / EP / Single release-groups for an artist MBID.
