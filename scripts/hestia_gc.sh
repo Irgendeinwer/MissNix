@@ -20,8 +20,8 @@ manifest_refs=$(gh api --paginate \
 
 while IFS= read -r ref; do
   if [[ -n "$ref" && "$ref" != "$GITHUB_REF" ]]; then
-    echo "::warning::Skipping Hestia GC: a manifest exists on another ref ($ref); see Mic92/hestia#162"
-    exit 0
+    echo "::error::Hestia GC refused: a manifest exists on another ref ($ref); see Mic92/hestia#162. Wait for expiry or remove that cache by ID, not by key."
+    exit 1
   fi
 done <<< "$manifest_refs"
 

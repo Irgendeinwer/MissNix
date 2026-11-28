@@ -66,10 +66,11 @@ class HestiaGarbageCollectionTests(unittest.TestCase):
         self.assertFalse(self.gh_args.exists())
         self.assertFalse(self.gc_args.exists())
 
-    def test_skips_collection_if_another_ref_has_a_manifest(self):
+    def test_refuses_collection_if_another_ref_has_a_manifest(self):
         result = self.run_gc(FAKE_MANIFEST_REFS="refs/heads/main\nrefs/pull/1/merge\n")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Skipping Hestia GC", result.stdout)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Hestia GC refused", result.stdout)
+        self.assertIn("by ID, not by key", result.stdout)
         self.assertFalse(self.gc_args.exists())
 
     def test_does_not_collect_if_listing_manifests_fails(self):
