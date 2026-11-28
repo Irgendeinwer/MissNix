@@ -81,9 +81,12 @@ MissNix/
 │   ├── icons/*.svg                   # Monochrome #FFFFFF vector icons tinted via Slint Image.colorize
 │   └── docs/                         # README SVG artwork and app screenshots
 ├── scripts/generate_release_notes.py # Commit summaries + GitHub-generated PR notes
+├── scripts/hestia_gc.sh              # Guarded default-branch Nix cache cleanup
 ├── tests/test_release_notes.py       # Release-note generation regression tests
+├── tests/test_hestia_gc.py           # Nix cache cleanup safety tests
 └── .github/workflows/
     ├── ci.yml                        # Cargo, responsive UI, release notes and Nix CI
+    ├── nix-cache-gc.yml              # Scheduled Hestia cache maintenance
     └── release.yml                   # Immutable SLSA-attested AppImage + tar.gz GitHub Release pipeline
 ```
 
@@ -175,6 +178,14 @@ xvfb-run -a -s "-screen 0 1920x1200x24" \
 ```
 
 These tests dispatch resize, scale, pointer, and key events to the UI; compositor-specific HiDPI behavior still needs testing on a real desktop.
+
+### Nix CI and cache maintenance
+
+CI runs the Nix package checks and the `nix develop` workspace tests in parallel. The original Nix status check waits for both jobs and fails unless both pass. Hestia caches Nix-built paths; `Swatinem/rust-cache` separately caches Cargo dependencies from the dev shell, keyed to the Nix configuration. Cache misses must still run the checks normally.
+
+Hestia v3.1.0 has a cross-ref manifest GC issue ([upstream #162](https://github.com/Mic92/hestia/issues/162)). Only default-branch builds may write its cache; other branches and pull requests are read-only. The scheduled `nix-cache-gc.yml` runs only on the default branch, and `scripts/hestia_gc.sh` refuses to collect if another ref has a v3 manifest. Its manual dispatch defaults to a dry run. Keep the Hestia action and binary versions in both workflows synchronized, and revisit the guard when updating Hestia. The GitHub Actions cache quota is shared with Cargo and release workflows, so old entries may still be evicted.
+
+The package is still a single `buildRustPackage` derivation: a Rust source change can require recompiling its dependencies even with Hestia. Its cache is most effective when the package derivation is unchanged; the dev-shell Cargo cache is independent.
 
 ### Publishing an Immutable Release
 

@@ -1,0 +1,48 @@
+name: Nix cache maintenance
+
+on:
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Plan cleanup without changing the cache
+        type: boolean
+        default: true
+
+# Hestia supports concurrent uploads, but two garbage collectors must not overlap.
+concurrency:
+  group: hestia-gc
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  gc:
+    if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Nix
+        uses: DeterminateSystems/determinate-nix-action@v3
+
+      # Keep the action and downloaded binary versions in sync with ci.yml.
+      - name: Install Hestia
+        uses: Mic92/hestia@v3.1.0
+        with:
+          version: v3.1.0
+          read-only: true
+
+      - name: Collect unused cache entries
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          HESTIA_GC_DRY_RUN: ${{ inputs.dry_run }}
+        run: bash scripts/hestia_gc.sh

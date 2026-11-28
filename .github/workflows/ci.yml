@@ -22,6 +22,9 @@ jobs:
       - name: Test release notes
         run: python3 -m unittest discover -s tests -p 'test_release_notes.py' -v
 
+      - name: Test Nix cache maintenance safeguards
+        run: python3 -m unittest discover -s tests -p 'test_hestia_gc.py' -v
+
   cargo:
     name: Cargo (fmt, clippy, test, build, headless CLI)
     runs-on: ubuntu-latest
@@ -188,12 +191,15 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/determinate-nix-action@v3
 
+      # Hestia v3.1.0 has a cross-ref manifest GC issue. Only the default
+      # branch writes; PRs and other branches can still read its cache.
+      # Keep the action and binary versions in sync with nix-cache-gc.yml.
       - name: Configure Hestia binary cache
         uses: Mic92/hestia@v3.1.0
         with:
           version: v3.1.0
           upstream-cache-filter: true
-          read-only: ${{ github.event_name == 'pull_request' }}
+          read-only: ${{ github.ref != format('refs/heads/{0}', github.event.repository.default_branch) }}
 
       - name: Run nix flake check
         run: |
