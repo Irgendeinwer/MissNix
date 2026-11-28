@@ -7,5 +7,7 @@
 *.db-shm
 /dist
 /tests/ui/node_modules/
+__pycache__/
+*.py[cod]
 /log.txt
 Unselected files/

@@ -130,10 +130,14 @@ jobs:
     needs: prepare
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout exact commit
+      - name: Checkout exact commit and release history
         uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Test release note generation
+        run: python3 -m unittest discover -s tests -p 'test_release_notes.py' -v
 
       - name: Install system build and GUI libraries
         run: |
@@ -259,6 +263,17 @@ jobs:
             dist/${{ steps.pkg.outputs.archive }}
             dist/SHA256SUMS
 
+      - name: Generate release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          python3 scripts/generate_release_notes.py \
+            --tag "$TAG" --target "$GITHUB_SHA" --repository "$GITHUB_REPOSITORY" \
+            > "$RUNNER_TEMP/release-notes.md"
+          test -s "$RUNNER_TEMP/release-notes.md"
+
       - name: Create immutable git tag & publish GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -283,7 +298,7 @@ jobs:
               "dist/SHA256SUMS" \
               --verify-tag \
               --title "MissNix ${TAG}" \
-              --generate-notes \
+              --notes-file "$RUNNER_TEMP/release-notes.md" \
               --prerelease
           else
             gh release create "$TAG" \
@@ -292,5 +307,5 @@ jobs:
               "dist/SHA256SUMS" \
               --verify-tag \
               --title "MissNix ${TAG}" \
-              --generate-notes
+              --notes-file "$RUNNER_TEMP/release-notes.md"
           fi

@@ -80,8 +80,10 @@ MissNix/
 │   ├── missnix.svg                   # Desktop launcher icon (hicolor/scalable/apps/missnix.svg)
 │   ├── icons/*.svg                   # Monochrome #FFFFFF vector icons tinted via Slint Image.colorize
 │   └── docs/                         # README SVG artwork and app screenshots
+├── scripts/generate_release_notes.py # Commit summaries + GitHub-generated PR notes
+├── tests/test_release_notes.py       # Release-note generation regression tests
 └── .github/workflows/
-    ├── ci.yml                        # Cargo + Determinate Nix Flake CI with Magic Nix Cache & rust-cache
+    ├── ci.yml                        # Cargo, responsive UI, release notes and Nix CI
     └── release.yml                   # Immutable SLSA-attested AppImage + tar.gz GitHub Release pipeline
 ```
 
@@ -178,3 +180,9 @@ These tests dispatch resize, scale, pointer, and key events to the UI; composito
 
 1. Bump `version` under `[workspace.package]` in root `Cargo.toml` (`crates/missnix-core/Cargo.toml` and `flake.nix` read it automatically) and update `Cargo.lock`.
 2. Commit to `main` with `release: vX.Y.Z` (or `chore(release): vX.Y.Z`) and push — `.github/workflows/release.yml` runs tests, builds `missnix-vX.Y.Z-linux-x86_64.AppImage` + `missnix-vX.Y.Z-linux-x86_64.tar.gz` + `SHA256SUMS`, signs SLSA build provenance, creates tag `vX.Y.Z`, and publishes the immutable GitHub Release.
+
+Release notes summarize commits since the closest published stable release on the target's ancestry and append GitHub's generated pull-request and contributor notes for the same range. Prereleases are cumulative from that stable release, and unpublished tags are ignored. Without a previous stable release, the summary covers the entire history; GitHub's PR section is included only if it covers the same range. The release job needs a full checkout with tags. Run the offline regression tests with:
+
+```bash
+python3 -m unittest discover -s tests -p 'test_release_notes.py' -v
+```
