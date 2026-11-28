@@ -175,9 +175,12 @@ jobs:
           xvfb-run -a -s "-screen 0 1920x1200x24" \
             env WINIT_UNIX_BACKEND=x11 SLINT_BACKEND=winit-skia-software npm test --prefix tests/ui
 
-  nix:
-    name: Nix (flake check, build, develop, headless CLI)
+  nix_build:
+    name: Nix package (flake check, build, headless CLI)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -185,8 +188,12 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/determinate-nix-action@v3
 
-      - name: Configure Magic Nix Cache
-        uses: DeterminateSystems/magic-nix-cache-action@v15
+      - name: Configure Hestia binary cache
+        uses: Mic92/hestia@v3.1.0
+        with:
+          version: v3.1.0
+          upstream-cache-filter: true
+          read-only: ${{ github.event_name == 'pull_request' }}
 
       - name: Run nix flake check
         run: |
@@ -229,11 +236,46 @@ jobs:
           echo "$JSON_OUT" | grep -q '"tracked_artists": 1'
           rm -rf "$SMOKE_DIR"
 
+  nix_develop:
+    name: Nix dev shell (workspace tests)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Nix
+        uses: DeterminateSystems/determinate-nix-action@v3
+
+      # Cargo's target directory is outside the Nix store and is not cached by Hestia.
+      - name: Restore Nix Cargo dependency cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: nix-develop-${{ hashFiles('flake.nix', 'flake.lock') }}
+          cmd-format: nix develop --command {0}
+          cache-bin: false
+
       - name: Run workspace tests inside nix develop
         run: |
           set -o pipefail
           if ! nix develop --command cargo test --workspace --locked 2>&1 | tee /tmp/nix-dev.log; then
             MSG=$(grep -v 'object files omitted' /tmp/nix-dev.log | tail -n 35 | cut -c1-240 | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')
             echo "::error title=nix develop test failed::${MSG}"
+            exit 1
+          fi
+
+  # Preserve the existing required-check name while running the two halves in parallel.
+  nix:
+    name: Nix (flake check, build, develop, headless CLI)
+    runs-on: ubuntu-latest
+    needs: [nix_build, nix_develop]
+    if: ${{ always() }}
+    steps:
+      - name: Require both Nix jobs to pass
+        env:
+          NIX_BUILD_RESULT: ${{ needs.nix_build.result }}
+          NIX_DEVELOP_RESULT: ${{ needs.nix_develop.result }}
+        run: |
+          if [[ "$NIX_BUILD_RESULT" != success || "$NIX_DEVELOP_RESULT" != success ]]; then
+            echo "::error::Nix package job: $NIX_BUILD_RESULT; Nix dev-shell job: $NIX_DEVELOP_RESULT"
             exit 1
           fi
